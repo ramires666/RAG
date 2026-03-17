@@ -1,0 +1,870 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RAG Books MVP</title>
+    <style>
+      :root {
+        --paper: #f4efe3;
+        --paper-strong: #fffaf0;
+        --ink: #1f2a30;
+        --muted: #6e7a7e;
+        --line: #d8cebc;
+        --accent: #0e7c6b;
+        --accent-2: #bb5b35;
+        --shadow: 0 18px 50px rgba(40, 30, 10, 0.08);
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI Variable", "Trebuchet MS", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(14, 124, 107, 0.12), transparent 30%),
+          radial-gradient(circle at right, rgba(187, 91, 53, 0.12), transparent 28%),
+          linear-gradient(180deg, #f8f3e8 0%, #efe7d8 100%);
+      }
+
+      .shell {
+        max-width: 1380px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 18px;
+        margin-bottom: 18px;
+      }
+
+      .panel {
+        background: rgba(255, 250, 240, 0.92);
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        box-shadow: var(--shadow);
+      }
+
+      .hero-main {
+        padding: 28px;
+        min-height: 220px;
+        background:
+          linear-gradient(140deg, rgba(255,255,255,0.86), rgba(255,250,240,0.72)),
+          radial-gradient(circle at 30% 20%, rgba(14,124,107,0.15), transparent 25%);
+      }
+
+      .eyebrow {
+        color: var(--accent);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 12px;
+      }
+
+      h1 {
+        margin: 12px 0 10px;
+        font-family: Georgia, Cambria, serif;
+        font-size: clamp(34px, 4vw, 58px);
+        line-height: 0.94;
+      }
+
+      .hero p {
+        margin: 0;
+        color: var(--muted);
+        max-width: 58ch;
+        line-height: 1.55;
+      }
+
+      .hero-side {
+        padding: 22px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .stat {
+        padding: 14px 16px;
+        border-radius: 18px;
+        background: var(--paper);
+        border: 1px solid var(--line);
+      }
+
+      .stat-label {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      .stat-value {
+        margin-top: 8px;
+        font-weight: 700;
+        font-size: 18px;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: 360px 1fr;
+        gap: 18px;
+      }
+
+      .sidebar, .chat {
+        padding: 20px;
+      }
+
+      .section-title {
+        margin: 0 0 12px;
+        font-size: 15px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+      }
+
+      .upload-box,
+      .question-box,
+      .answer-box,
+      .book-list {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(255,255,255,0.6);
+      }
+
+      .upload-box,
+      .question-box,
+      .answer-box {
+        padding: 16px;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      input[type="file"],
+      select,
+      textarea,
+      button {
+        width: 100%;
+      }
+
+      textarea,
+      select {
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        padding: 12px 14px;
+        background: rgba(255,255,255,0.96);
+        color: var(--ink);
+        font: inherit;
+      }
+
+      textarea {
+        min-height: 128px;
+        resize: vertical;
+      }
+
+      .button-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .demo-block {
+        margin-top: 16px;
+      }
+
+      .demo-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 10px;
+      }
+
+      .demo-btn {
+        text-align: left;
+        border: 1px solid var(--line);
+        background: linear-gradient(180deg, #fffdf7 0%, #f3eadb 100%);
+        color: var(--ink);
+      }
+
+      .demo-btn small {
+        display: block;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      button {
+        border: none;
+        border-radius: 14px;
+        padding: 12px 14px;
+        font-weight: 800;
+        cursor: pointer;
+        transition: transform 0.16s ease, opacity 0.16s ease;
+      }
+
+      button:hover { transform: translateY(-1px); }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+      .primary {
+        background: var(--accent);
+        color: white;
+      }
+
+      .secondary {
+        background: #e8ddd0;
+        color: var(--ink);
+      }
+
+      .book-list {
+        padding: 8px;
+        max-height: 480px;
+        overflow: auto;
+      }
+
+      .book {
+        border-radius: 16px;
+        border: 1px solid transparent;
+        padding: 12px;
+        background: rgba(244, 239, 227, 0.84);
+        margin-bottom: 8px;
+      }
+
+      .book.active {
+        border-color: var(--accent);
+        background: rgba(14, 124, 107, 0.08);
+      }
+
+      .book-title {
+        font-weight: 800;
+        line-height: 1.25;
+      }
+
+      .book-meta {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .book-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .book-actions button {
+        width: 100%;
+      }
+
+      .question-grid {
+        display: grid;
+        grid-template-columns: 220px 1fr;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .answer-box {
+        min-height: 320px;
+      }
+
+      .answer-text {
+        white-space: pre-wrap;
+        line-height: 1.62;
+      }
+
+      .citations {
+        margin-top: 18px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .citation {
+        padding: 12px;
+        border-radius: 14px;
+        background: #fbf6eb;
+        border: 1px solid var(--line);
+      }
+
+      .status-bar {
+        margin-top: 14px;
+        font-size: 14px;
+        color: var(--muted);
+      }
+
+      .progress-box {
+        margin-top: 16px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(255,255,255,0.72);
+      }
+
+      .progress-track {
+        width: 100%;
+        height: 12px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: #eadfce;
+        border: 1px solid var(--line);
+      }
+
+      .progress-fill {
+        width: 0%;
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, var(--accent) 0%, #31b59f 100%);
+        transition: width 0.3s ease;
+      }
+
+      .progress-meta {
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 6px 10px;
+        background: rgba(187, 91, 53, 0.1);
+        color: var(--accent-2);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      @media (max-width: 980px) {
+        .hero,
+        .workspace,
+        .question-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .demo-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <section class="hero">
+        <div class="panel hero-main">
+          <div class="eyebrow">Books • RAG • LightRAG</div>
+          <h1>Загружай книги, индексируй их и задавай вопросы в одном окне.</h1>
+          <p>
+            Этот MVP рассчитан на быстрый цикл: PDF загружается, режется по страницам,
+            уходит в LightRAG, а затем доступен в режимах <strong>auto</strong>,
+            <strong>naive</strong>, <strong>local</strong>, <strong>global</strong>,
+            <strong>hybrid</strong> и <strong>mix</strong>.
+          </p>
+        </div>
+
+        <div class="panel hero-side">
+          <div class="stat">
+            <div class="stat-label">LLM backend</div>
+            <div class="stat-value" id="llmStatus">checking…</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Embedding backend</div>
+            <div class="stat-value" id="embeddingStatus">checking…</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Selected book</div>
+            <div class="stat-value" id="selectedBookLabel">none</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <aside class="panel sidebar">
+          <h2 class="section-title">Library</h2>
+
+          <div class="upload-box">
+            <label for="pdfFile">Новая книга (PDF)</label>
+            <input id="pdfFile" type="file" accept="application/pdf" />
+            <div class="button-row">
+              <button id="uploadBtn" class="primary">Upload</button>
+              <button id="refreshBtn" class="secondary">Refresh</button>
+            </div>
+            <div class="button-row">
+              <button id="deleteIndexBtn" class="secondary">Delete Selected Index</button>
+              <button id="reindexBtn" class="secondary">Delete + Reindex</button>
+            </div>
+          </div>
+
+          <div class="status-bar" id="sidebarStatus">Готово.</div>
+
+          <div class="progress-box">
+            <h2 class="section-title" style="margin-bottom: 12px;">Index Progress</h2>
+            <div id="indexStatusPill" class="pill">idle</div>
+            <div class="progress-track" style="margin-top: 12px;">
+              <div id="indexProgressFill" class="progress-fill"></div>
+            </div>
+            <div id="indexProgressMeta" class="progress-meta">Нет активной индексации.</div>
+            <div id="indexStatsMeta" class="progress-meta">Статистика появится после старта индексации.</div>
+            <div id="indexWarningsMeta" class="progress-meta">Format warnings будут показаны здесь.</div>
+            <div id="indexTimeMeta" class="progress-meta">ETA появится, когда накопится достаточно данных.</div>
+            <div id="gpuStatus" class="progress-meta">GPU: данные недоступны.</div>
+          </div>
+
+          <h2 class="section-title" style="margin-top: 20px;">Books</h2>
+          <div id="bookList" class="book-list"></div>
+        </aside>
+
+        <main class="panel chat">
+          <h2 class="section-title">Ask</h2>
+          <div class="question-box">
+            <div class="question-grid">
+              <div>
+                <label for="modeSelect">Режим</label>
+                <select id="modeSelect">
+                  <option value="auto">auto</option>
+                  <option value="naive">naive</option>
+                  <option value="local">local</option>
+                  <option value="global">global</option>
+                  <option value="hybrid">hybrid</option>
+                  <option value="mix" selected>mix</option>
+                </select>
+              </div>
+
+              <div>
+                <label for="questionInput">Вопрос</label>
+                <textarea
+                  id="questionInput"
+                  placeholder="Например: Какие главные идеи в этой книге и как автор связывает их между собой?"
+                ></textarea>
+              </div>
+            </div>
+
+            <div class="button-row">
+              <button id="askBtn" class="primary">Ask</button>
+              <button id="indexBtn" class="secondary">Reindex Selected Book</button>
+            </div>
+
+            <div class="demo-block">
+              <label>Демо-вопросы</label>
+              <div id="demoQuestions" class="demo-grid">
+                <button class="demo-btn" data-question="Сделай краткое summary книги." data-mode="global">
+                  Краткое summary
+                  <small>mode: global</small>
+                </button>
+                <button class="demo-btn" data-question="О чем эта книга в целом и какие темы в ней самые важные?" data-mode="mix">
+                  Общий обзор книги
+                  <small>mode: mix</small>
+                </button>
+                <button class="demo-btn" data-question="Какие основные разделы или блоки тем можно выделить в книге?" data-mode="global">
+                  Структура тем
+                  <small>mode: global</small>
+                </button>
+                <button class="demo-btn" data-question="Что говорится на первых страницах книги?" data-mode="naive">
+                  Первые страницы
+                  <small>mode: naive</small>
+                </button>
+                <button class="demo-btn" data-question="Какие ключевые термины и понятия чаще всего встречаются в книге?" data-mode="local">
+                  Ключевые термины
+                  <small>mode: local</small>
+                </button>
+                <button class="demo-btn" data-question="Как связаны между собой главные понятия, которые обсуждаются в книге?" data-mode="local">
+                  Связи понятий
+                  <small>mode: local</small>
+                </button>
+                <button class="demo-btn" data-question="Какие задачи или примеры встречаются в книге чаще всего?" data-mode="mix">
+                  Типовые задачи
+                  <small>mode: mix</small>
+                </button>
+                <button class="demo-btn" data-question="Составь короткий список того, что стоит изучить по этой книге в первую очередь." data-mode="mix">
+                  Что учить сначала
+                  <small>mode: mix</small>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="status-bar" id="chatStatus">Выбери книгу, затем загрузи или проиндексируй ее.</div>
+
+          <div class="answer-box">
+            <div id="answerMode" class="pill">no answer yet</div>
+            <div id="answerText" class="answer-text" style="margin-top: 16px;">
+              Здесь появится ответ модели.
+            </div>
+            <div id="citations" class="citations"></div>
+          </div>
+        </main>
+      </section>
+    </div>
+
+    <script>
+      const state = { books: [], selectedBookId: null, indexPollTimer: null, pollingBookId: null };
+
+      const ui = {
+        bookList: document.getElementById("bookList"),
+        sidebarStatus: document.getElementById("sidebarStatus"),
+        chatStatus: document.getElementById("chatStatus"),
+        indexStatusPill: document.getElementById("indexStatusPill"),
+        indexProgressFill: document.getElementById("indexProgressFill"),
+        indexProgressMeta: document.getElementById("indexProgressMeta"),
+        indexStatsMeta: document.getElementById("indexStatsMeta"),
+        indexWarningsMeta: document.getElementById("indexWarningsMeta"),
+        indexTimeMeta: document.getElementById("indexTimeMeta"),
+        gpuStatus: document.getElementById("gpuStatus"),
+        answerText: document.getElementById("answerText"),
+        answerMode: document.getElementById("answerMode"),
+        citations: document.getElementById("citations"),
+        llmStatus: document.getElementById("llmStatus"),
+        embeddingStatus: document.getElementById("embeddingStatus"),
+        selectedBookLabel: document.getElementById("selectedBookLabel"),
+        pdfFile: document.getElementById("pdfFile"),
+        questionInput: document.getElementById("questionInput"),
+        modeSelect: document.getElementById("modeSelect"),
+        demoQuestions: document.getElementById("demoQuestions"),
+        uploadBtn: document.getElementById("uploadBtn"),
+        refreshBtn: document.getElementById("refreshBtn"),
+        askBtn: document.getElementById("askBtn"),
+        indexBtn: document.getElementById("indexBtn"),
+        deleteIndexBtn: document.getElementById("deleteIndexBtn"),
+        reindexBtn: document.getElementById("reindexBtn"),
+      };
+
+      async function fetchJson(url, options = {}) {
+        const response = await fetch(url, options);
+        const contentType = response.headers.get("content-type") || "";
+        const payload = contentType.includes("application/json")
+          ? await response.json()
+          : await response.text();
+        if (!response.ok) {
+          const detail = typeof payload === "string" ? payload : payload.detail || JSON.stringify(payload);
+          throw new Error(detail);
+        }
+        return payload;
+      }
+
+      function setSidebarStatus(message) { ui.sidebarStatus.textContent = message; }
+      function setChatStatus(message) { ui.chatStatus.textContent = message; }
+
+      function isRunningStatus(status) {
+        return status === "queued" || status === "running";
+      }
+
+      function formatDuration(totalSeconds) {
+        if (totalSeconds == null || Number.isNaN(totalSeconds)) {
+          return "n/a";
+        }
+        const seconds = Math.max(0, Math.round(totalSeconds));
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        if (hours > 0) {
+          return `${hours}h ${minutes}m ${secs}s`;
+        }
+        if (minutes > 0) {
+          return `${minutes}m ${secs}s`;
+        }
+        return `${secs}s`;
+      }
+
+      function renderIndexStatus(data) {
+        if (!data) {
+          ui.indexStatusPill.textContent = "idle";
+          ui.indexProgressFill.style.width = "0%";
+          ui.indexProgressMeta.textContent = "Нет активной индексации.";
+          ui.indexStatsMeta.textContent = "Статистика появится после старта индексации.";
+          ui.indexWarningsMeta.textContent = "Format warnings будут показаны здесь.";
+          ui.indexTimeMeta.textContent = "ETA появится, когда накопится достаточно данных.";
+          ui.gpuStatus.textContent = "GPU: данные недоступны.";
+          return;
+        }
+
+        const completed = (data.processed_docs || 0) + (data.failed_docs || 0);
+        const total = data.total_docs || 0;
+        let percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+        if (data.status === "indexed") {
+          percent = 100;
+        }
+        percent = Math.max(0, Math.min(100, percent));
+
+        ui.indexStatusPill.textContent = data.status;
+        ui.indexProgressFill.style.width = `${percent}%`;
+        ui.indexProgressMeta.textContent =
+          `${data.detail} ${total > 0 ? `• ${completed}/${total} pages` : ""} • ${data.progress_percent ?? percent}%`;
+        ui.indexStatsMeta.textContent =
+          `Pages: ${completed}/${total || "?"} • Remaining: ${data.remaining_docs || 0} • Chunks: ${data.chunk_count || 0} • Entities: ${data.entity_count || 0} • Relations: ${data.relation_count || 0}`;
+        ui.indexWarningsMeta.textContent =
+          `Format errors: ${data.format_error_count || 0} • Relation: ${data.relation_format_error_count || 0} • Entity: ${data.entity_format_error_count || 0} • Warning chunks: ${data.warning_chunk_count || 0}${data.last_warning ? ` • Last: ${String(data.last_warning).slice(0, 180)}` : ""}`;
+        ui.indexTimeMeta.textContent =
+          `Elapsed: ${formatDuration(data.elapsed_seconds)} • Speed: ${data.pages_per_minute ?? "n/a"} pages/min • ETA: ${formatDuration(data.eta_seconds)}`;
+
+        if (data.gpu && data.gpu.name) {
+          ui.gpuStatus.textContent =
+            `GPU: ${data.gpu.name} • load ${data.gpu.utilization_gpu ?? "?"}% • VRAM ${data.gpu.memory_used_mb ?? "?"}/${data.gpu.memory_total_mb ?? "?"} MB`;
+        } else {
+          ui.gpuStatus.textContent = "GPU: данные недоступны.";
+        }
+      }
+
+      function stopIndexPolling() {
+        if (state.indexPollTimer) {
+          clearInterval(state.indexPollTimer);
+          state.indexPollTimer = null;
+        }
+        state.pollingBookId = null;
+      }
+
+      function startIndexPolling(bookId) {
+        if (!bookId) return;
+        if (state.indexPollTimer && state.pollingBookId === bookId) return;
+        stopIndexPolling();
+        state.pollingBookId = bookId;
+        state.indexPollTimer = setInterval(() => {
+          refreshIndexStatus(bookId, { autoPoll: false }).catch((error) => {
+            stopIndexPolling();
+            setSidebarStatus(error.message);
+          });
+        }, 1500);
+      }
+
+      async function refreshIndexStatus(bookId = state.selectedBookId, { autoPoll = true } = {}) {
+        if (!bookId) {
+          stopIndexPolling();
+          renderIndexStatus(null);
+          return null;
+        }
+
+        const data = await fetchJson(`/books/${bookId}/index/status`);
+        renderIndexStatus(data);
+
+        if (autoPoll && isRunningStatus(data.status)) {
+          startIndexPolling(bookId);
+        }
+
+        if (!isRunningStatus(data.status) && state.pollingBookId === bookId) {
+          stopIndexPolling();
+          await loadBooks({ refreshStatus: false });
+        }
+
+        return data;
+      }
+
+      function setSelectedBook(bookId) {
+        if (state.pollingBookId && state.pollingBookId !== bookId) {
+          stopIndexPolling();
+        }
+        state.selectedBookId = bookId;
+        const book = state.books.find((item) => item.book_id === bookId);
+        ui.selectedBookLabel.textContent = book ? book.title : "none";
+        renderBooks();
+        refreshIndexStatus(bookId).catch((error) => setSidebarStatus(error.message));
+      }
+
+      function renderBooks() {
+        ui.bookList.innerHTML = "";
+        if (!state.books.length) {
+          ui.bookList.innerHTML = "<div class='book'><div class='book-title'>Пока нет книг</div><div class='book-meta'>Загрузи первый PDF слева.</div></div>";
+          return;
+        }
+
+        for (const book of state.books) {
+          const item = document.createElement("div");
+          item.className = `book ${book.book_id === state.selectedBookId ? "active" : ""}`;
+          item.innerHTML = `
+            <div class="book-title">${book.title}</div>
+            <div class="book-meta">${book.pages} pages • status: ${book.status}</div>
+            <div class="book-meta">${book.indexed_at ? `indexed: ${new Date(book.indexed_at).toLocaleString()}` : "not indexed yet"}</div>
+            <div class="book-actions">
+              <button class="secondary" data-action="select" data-book="${book.book_id}">Select</button>
+              <button class="primary" data-action="reindex" data-book="${book.book_id}">Reindex</button>
+              <button class="secondary" data-action="delete-index" data-book="${book.book_id}">Delete Index</button>
+            </div>
+          `;
+          ui.bookList.appendChild(item);
+        }
+      }
+
+      function renderAnswer(data) {
+        ui.answerMode.textContent = `requested ${data.mode_requested} • used ${data.mode_used}`;
+        ui.answerText.textContent = data.answer;
+        ui.citations.innerHTML = "";
+
+        for (const citation of data.citations || []) {
+          const node = document.createElement("div");
+          node.className = "citation";
+          node.innerHTML = `
+            <strong>page ${citation.page ?? "?"}</strong>
+            <div style="margin-top: 8px; color: var(--muted); line-height: 1.5;">${citation.snippet || "No snippet available."}</div>
+          `;
+          ui.citations.appendChild(node);
+        }
+      }
+
+      async function loadSettings() {
+        const data = await fetchJson("/settings/status");
+        ui.llmStatus.textContent = data.ready_for_query
+          ? `${data.llm_model} @ ${data.llm_base_url}`
+          : "LLM config is missing";
+        ui.embeddingStatus.textContent = `${data.embedding_backend}${data.embedding_model ? ` • ${data.embedding_model}` : ""}`;
+      }
+
+      async function loadBooks({ refreshStatus = true } = {}) {
+        const books = await fetchJson("/books");
+        state.books = books;
+        if (!state.selectedBookId && books.length) {
+          state.selectedBookId = books[0].book_id;
+        }
+        if (state.selectedBookId && !books.find((item) => item.book_id === state.selectedBookId)) {
+          state.selectedBookId = books[0]?.book_id || null;
+        }
+        ui.selectedBookLabel.textContent =
+          state.books.find((item) => item.book_id === state.selectedBookId)?.title || "none";
+        renderBooks();
+        if (refreshStatus) {
+          await refreshIndexStatus(state.selectedBookId, { autoPoll: true });
+        }
+      }
+
+      async function uploadBook() {
+        const file = ui.pdfFile.files[0];
+        if (!file) {
+          setSidebarStatus("Сначала выбери PDF файл.");
+          return;
+        }
+
+        const form = new FormData();
+        form.append("file", file);
+        setSidebarStatus(`Загружаю ${file.name}...`);
+        const data = await fetchJson("/books/upload", { method: "POST", body: form });
+        setSidebarStatus(`Загружено: ${data.title}`);
+        await loadBooks();
+        setSelectedBook(data.book_id);
+      }
+
+      async function indexBook(bookId = state.selectedBookId) {
+        if (!bookId) {
+          setSidebarStatus("Сначала выбери книгу.");
+          return;
+        }
+
+        setSidebarStatus(`Индексирую ${bookId}... Это может занять время.`);
+        const data = await fetchJson(`/books/${bookId}/index`, { method: "POST" });
+        setSidebarStatus(data.detail);
+        await loadBooks();
+        setSelectedBook(bookId);
+      }
+
+      async function deleteIndex(bookId = state.selectedBookId) {
+        if (!bookId) {
+          setSidebarStatus("Сначала выбери книгу.");
+          return;
+        }
+
+        setSidebarStatus(`Удаляю индекс ${bookId}...`);
+        const data = await fetchJson(`/books/${bookId}/index`, { method: "DELETE" });
+        if (state.pollingBookId === bookId) {
+          stopIndexPolling();
+        }
+        setSidebarStatus(data.detail);
+        await loadBooks();
+        setSelectedBook(bookId);
+      }
+
+      async function reindexBook(bookId = state.selectedBookId) {
+        if (!bookId) {
+          setSidebarStatus("Сначала выбери книгу.");
+          return;
+        }
+
+        setSidebarStatus(`Запускаю переиндексацию ${bookId}...`);
+        const data = await fetchJson(`/books/${bookId}/reindex/start`, { method: "POST" });
+        renderIndexStatus(data);
+        setSelectedBook(bookId);
+        setSidebarStatus(data.detail);
+        if (isRunningStatus(data.status)) {
+          startIndexPolling(bookId);
+        }
+      }
+
+      async function askQuestion() {
+        if (!state.selectedBookId) {
+          setChatStatus("Сначала выбери книгу.");
+          return;
+        }
+
+        const question = ui.questionInput.value.trim();
+        if (!question) {
+          setChatStatus("Введи вопрос.");
+          return;
+        }
+
+        setChatStatus("Выполняю запрос...");
+        const data = await fetchJson("/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            question,
+            mode: ui.modeSelect.value,
+            book_id: state.selectedBookId,
+          }),
+        });
+        renderAnswer(data);
+        setChatStatus("Готово.");
+      }
+
+      async function askDemoQuestion(question, mode) {
+        ui.questionInput.value = question;
+        if (mode) {
+          ui.modeSelect.value = mode;
+        }
+        await askQuestion();
+      }
+
+      ui.uploadBtn.addEventListener("click", () => uploadBook().catch((error) => setSidebarStatus(error.message)));
+      ui.refreshBtn.addEventListener("click", () => loadBooks().catch((error) => setSidebarStatus(error.message)));
+      ui.askBtn.addEventListener("click", () => askQuestion().catch((error) => setChatStatus(error.message)));
+      ui.indexBtn.addEventListener("click", () => reindexBook().catch((error) => setSidebarStatus(error.message)));
+      ui.deleteIndexBtn.addEventListener("click", () => deleteIndex().catch((error) => setSidebarStatus(error.message)));
+      ui.reindexBtn.addEventListener("click", () => reindexBook().catch((error) => setSidebarStatus(error.message)));
+
+      ui.bookList.addEventListener("click", (event) => {
+        const target = event.target.closest("button");
+        if (!target) return;
+        const bookId = target.dataset.book;
+        const action = target.dataset.action;
+        if (action === "select") {
+          setSelectedBook(bookId);
+          return;
+        }
+        if (action === "reindex") {
+          reindexBook(bookId).catch((error) => setSidebarStatus(error.message));
+          return;
+        }
+        if (action === "delete-index") {
+          deleteIndex(bookId).catch((error) => setSidebarStatus(error.message));
+        }
+      });
+
+      ui.demoQuestions.addEventListener("click", (event) => {
+        const target = event.target.closest(".demo-btn");
+        if (!target) return;
+        const question = target.dataset.question || "";
+        const mode = target.dataset.mode || "mix";
+        askDemoQuestion(question, mode).catch((error) => setChatStatus(error.message));
+      });
+
+      Promise.all([loadSettings(), loadBooks()])
+        .then(() => { renderBooks(); })
+        .catch((error) => {
+          setSidebarStatus(error.message);
+          setChatStatus(error.message);
+        });
+    </script>
+  </body>
+</html>

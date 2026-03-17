@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+.venv/
+venv/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+.cache/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# IDE / OS noise
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# Local source documents
+books/
+
+# Runtime data
+data/raw/*
+data/parsed/*
+data/indexes/*
+data/lightrag/*
+
+# Keep directory placeholders
+!data/raw/.gitkeep
+!data/parsed/.gitkeep
+!data/indexes/.gitkeep
+!data/lightrag/.gitkeep
