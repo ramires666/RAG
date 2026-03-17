@@ -401,6 +401,9 @@
               <button id="deleteIndexBtn" class="secondary">Delete Selected Index</button>
               <button id="reindexBtn" class="secondary">Delete + Reindex</button>
             </div>
+            <div class="button-row">
+              <button id="repairBtn" class="secondary">Repair Missing/Failed</button>
+            </div>
           </div>
 
           <div class="status-bar" id="sidebarStatus">Готово.</div>
@@ -450,6 +453,7 @@
             <div class="button-row">
               <button id="askBtn" class="primary">Ask</button>
               <button id="indexBtn" class="secondary">Reindex Selected Book</button>
+              <button id="repairAskBtn" class="secondary">Repair Selected Book</button>
             </div>
 
             <div class="demo-block">
@@ -534,6 +538,8 @@
         indexBtn: document.getElementById("indexBtn"),
         deleteIndexBtn: document.getElementById("deleteIndexBtn"),
         reindexBtn: document.getElementById("reindexBtn"),
+        repairBtn: document.getElementById("repairBtn"),
+        repairAskBtn: document.getElementById("repairAskBtn"),
       };
 
       async function fetchJson(url, options = {}) {
@@ -683,6 +689,7 @@
             <div class="book-actions">
               <button class="secondary" data-action="select" data-book="${book.book_id}">Select</button>
               <button class="primary" data-action="reindex" data-book="${book.book_id}">Reindex</button>
+              <button class="secondary" data-action="repair" data-book="${book.book_id}">Repair</button>
               <button class="secondary" data-action="delete-index" data-book="${book.book_id}">Delete Index</button>
             </div>
           `;
@@ -792,6 +799,34 @@
         }
       }
 
+      async function repairBook(bookId = state.selectedBookId) {
+        if (!bookId) {
+          setSidebarStatus("Сначала выбери книгу.");
+          return;
+        }
+
+        setSidebarStatus(`Сканирую repair-план для ${bookId}...`);
+        const plan = await fetchJson(`/books/${bookId}/repair/plan`);
+        if (plan.status === "error") {
+          setSidebarStatus(plan.detail);
+          return;
+        }
+        if ((plan.repairable_docs || 0) === 0) {
+          setSidebarStatus(plan.detail);
+          await refreshIndexStatus(bookId, { autoPoll: false });
+          return;
+        }
+
+        setSidebarStatus(`${plan.detail} Запускаю repair...`);
+        const data = await fetchJson(`/books/${bookId}/repair/start`, { method: "POST" });
+        renderIndexStatus(data);
+        setSelectedBook(bookId);
+        setSidebarStatus(data.detail);
+        if (isRunningStatus(data.status)) {
+          startIndexPolling(bookId);
+        }
+      }
+
       async function askQuestion() {
         if (!state.selectedBookId) {
           setChatStatus("Сначала выбери книгу.");
@@ -832,6 +867,8 @@
       ui.indexBtn.addEventListener("click", () => reindexBook().catch((error) => setSidebarStatus(error.message)));
       ui.deleteIndexBtn.addEventListener("click", () => deleteIndex().catch((error) => setSidebarStatus(error.message)));
       ui.reindexBtn.addEventListener("click", () => reindexBook().catch((error) => setSidebarStatus(error.message)));
+      ui.repairBtn.addEventListener("click", () => repairBook().catch((error) => setSidebarStatus(error.message)));
+      ui.repairAskBtn.addEventListener("click", () => repairBook().catch((error) => setSidebarStatus(error.message)));
 
       ui.bookList.addEventListener("click", (event) => {
         const target = event.target.closest("button");
@@ -844,6 +881,10 @@
         }
         if (action === "reindex") {
           reindexBook(bookId).catch((error) => setSidebarStatus(error.message));
+          return;
+        }
+        if (action === "repair") {
+          repairBook(bookId).catch((error) => setSidebarStatus(error.message));
           return;
         }
         if (action === "delete-index") {

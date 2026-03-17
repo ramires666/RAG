@@ -529,6 +529,13 @@ class LightRAGService:
                 if is_alive:
                     raise
 
+                grace_recovered = await self._wait_for_existing_llm_ready(
+                    model=model,
+                    timeout_seconds=max(int(self.settings.llm_restart_grace_seconds), 1),
+                )
+                if grace_recovered:
+                    continue
+
                 LOGGER.warning(
                     "LLM call failed and healthcheck is down. Restart attempt %s/%s. Error: %s",
                     attempt,
@@ -604,7 +611,10 @@ class LightRAGService:
             return False
 
         async with LLM_RESTART_LOCK:
-            if await self._check_llm_ready(model):
+            if await self._wait_for_existing_llm_ready(
+                model=model,
+                timeout_seconds=max(int(self.settings.llm_restart_grace_seconds), 1),
+            ):
                 return True
 
             try:
@@ -631,6 +641,21 @@ class LightRAGService:
                 await asyncio.sleep(poll_interval)
 
             return False
+
+    async def _wait_for_existing_llm_ready(self, model: str, timeout_seconds: int) -> bool:
+        if timeout_seconds <= 0:
+            return await self._check_llm_ready(model)
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_seconds
+        poll_interval = min(max(float(self.settings.llm_restart_poll_interval_seconds), 0.5), 2.0)
+
+        while loop.time() < deadline:
+            if await self._check_llm_ready(model):
+                return True
+            await asyncio.sleep(poll_interval)
+
+        return await self._check_llm_ready(model)
 
     def _healthcheck_url(self) -> str | None:
         if self.settings.llm_healthcheck_url:
