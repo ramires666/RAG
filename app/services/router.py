@@ -6,27 +6,39 @@ from typing import Literal
 from app.config import get_settings
 
 
-RouteMode = Literal["naive", "local", "global", "mix"]
-ALLOWED_MODES: tuple[RouteMode, ...] = ("naive", "local", "global", "mix")
+RouteMode = Literal["naive", "local", "global", "hybrid", "mix"]
+ALLOWED_MODES: tuple[RouteMode, ...] = ("naive", "local", "global", "hybrid", "mix")
 
 ROUTER_INSTRUCTIONS = """
-You are a query router for a PDF books RAG system.
+You are the retrieval-mode router for a PDF-book RAG system.
 
-Classify the user question into exactly one retrieval mode:
-- naive: factual lookup, quote request, page-specific question, direct extraction
-- local: relationships between entities, characters, terms, or concepts in a bounded context
-- global: whole-book themes, high-level summaries, central ideas, broad conclusions
-- mix: ambiguous, broad, multi-hop, or when both graph-style and vector-style retrieval may help
+Your task is to choose exactly one mode for the user's question:
+- naive: direct lookup in text chunks. Best for quotes, definitions, formulas, page-specific questions, and exact factual extraction.
+- local: graph retrieval around a bounded set of entities, terms, characters, theorems, or concepts. Best for "how is A related to B?" in a narrow scope.
+- global: whole-book or whole-chapter understanding. Best for themes, high-level summaries, main ideas, structure, conclusions, and overall interpretation.
+- hybrid: combine local and global graph retrieval. Best when the user needs both specific concept relations and broader context, but the question is still concept-centric rather than quote-centric.
+- mix: combine graph retrieval and vector chunk retrieval. Best for ambiguous, multi-hop, open-ended, or mixed questions where both conceptual structure and concrete passages/examples are likely needed.
 
-Important:
-- If the question asks about relations between specific named entities or a clearly bounded concept set, prefer local.
-- If the question asks about the main concepts of the whole book and how they connect overall, prefer mix or global, not local.
+Decision policy:
+1. Choose naive when the user is asking for an exact place in text, a quotation, a formula, a page, or a short factual extraction.
+2. Choose local when the question is about links among specific named items in a limited context.
+3. Choose global when the question is about the whole book, a broad topic, a summary, the author's main point, or major sections.
+4. Choose hybrid when the user asks to explain how several important concepts fit together at a meaningful but still structured level.
+5. Choose mix when the question is broad, ambiguous, multi-part, needs examples plus interpretation, or may benefit from both graph reasoning and exact text evidence.
 
-Return only JSON that matches the provided schema.
+Tie-breaking:
+- If the question mentions a page number, quote, citation, formula, or "what exactly is written", prefer naive.
+- If the question asks "how are X and Y connected" and X/Y are specific concepts or names, prefer local.
+- If the question asks "what is this book about overall", prefer global.
+- If the question asks for a conceptual map of several important notions across the book, prefer hybrid.
+- If the question asks for both overview and concrete supporting details/examples, prefer mix.
+- When unsure between hybrid and mix, prefer mix.
+
+Think silently. Return JSON only with one field: {"mode":"..."}.
 """.strip()
 
 ROUTER_USER_TEMPLATE = """
-Classify this user question into exactly one mode: naive, local, global, or mix.
+Classify this user question into exactly one mode: naive, local, global, hybrid, or mix.
 
 Question:
 {question}
@@ -52,6 +64,7 @@ class QueryRouter:
             "связь",
             "отношение",
             "связан",
+            "связаны",
             "персонаж",
             "термин",
             "концепт",
@@ -64,6 +77,15 @@ class QueryRouter:
             "между собой",
             "главные темы",
             "основные темы",
+        )
+        self.hybrid_keywords = (
+            "как устроено",
+            "как связаны",
+            "как соотносятся",
+            "объясни взаимосвязь",
+            "карта понятий",
+            "система понятий",
+            "как понятия связаны",
         )
         self.global_keywords = (
             "тема",
@@ -151,6 +173,8 @@ class QueryRouter:
             return "naive"
         if any(keyword in text for keyword in self.global_keywords):
             return "global"
+        if any(keyword in text for keyword in self.hybrid_keywords):
+            return "hybrid"
         if any(keyword in text for keyword in self.graph_keywords) and any(
             keyword in text for keyword in self.broad_relation_keywords
         ):

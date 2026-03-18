@@ -804,7 +804,7 @@ class LightRAGService:
         }
 
     def _build_page_documents(self, payload: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
-        title = str(payload.get("title", payload.get("book_id", "Book")))
+        title = str(payload.get("title", payload.get("book_id", "Книга")))
         book_id = str(payload.get("book_id"))
         raw_path = str(payload.get("raw_path", self.settings.raw_dir / f"{book_id}.pdf"))
 
@@ -819,7 +819,7 @@ class LightRAGService:
             if not is_indexable_page(text):
                 continue
 
-            documents.append(f"Book: {title}\nPage: {page_number}\n\n{text}")
+            documents.append(f"Книга: {title}\nСтраница: {page_number}\n\n{text}")
             ids.append(f"{book_id}-page-{page_number:04d}")
             file_paths.append(f"{raw_path}#page={page_number}")
 
@@ -1044,7 +1044,7 @@ class LightRAGService:
             ref_id = str(ref.get("reference_id", ""))
             file_path = str(ref.get("file_path", ""))
             page = self._extract_page_number(file_path)
-            snippet = ref_to_snippets.get(ref_id, [""])[0][:240]
+            snippet = self._clean_snippet(ref_to_snippets.get(ref_id, [""])[0])[:240]
             citations.append(Citation(book_id=book_id, page=page, snippet=snippet))
 
         if not citations and chunks:
@@ -1053,11 +1053,19 @@ class LightRAGService:
                 Citation(
                     book_id=book_id,
                     page=self._extract_page_number(str(first_chunk.get("file_path", ""))),
-                    snippet=str(first_chunk.get("content", ""))[:240],
+                    snippet=self._clean_snippet(str(first_chunk.get("content", "")))[:240],
                 )
             )
 
         return citations
+
+    def _clean_snippet(self, content: str) -> str:
+        snippet = str(content or "").strip()
+        snippet = re.sub(r"^\s*Book:\s*[^\n]+(?:\n|$)", "", snippet, flags=re.IGNORECASE)
+        snippet = re.sub(r"^\s*Page:\s*\d+(?:\n|$)", "", snippet, flags=re.IGNORECASE)
+        snippet = re.sub(r"^\s*Книга:\s*[^\n]+(?:\n|$)", "", snippet, flags=re.IGNORECASE)
+        snippet = re.sub(r"^\s*Страница:\s*\d+(?:\n|$)", "", snippet, flags=re.IGNORECASE)
+        return snippet.strip()
 
     def _extract_page_number(self, file_path: str) -> int | None:
         match = PAGE_RE.search(file_path)

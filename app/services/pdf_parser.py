@@ -9,6 +9,7 @@ from fastapi import UploadFile
 
 from app.config import get_settings
 from app.models.schemas import BookUploadResponse
+from app.services.book_title import resolve_book_title, sanitize_pdf_metadata
 
 
 class PDFParser:
@@ -17,22 +18,32 @@ class PDFParser:
 
     async def save_and_parse(self, file: UploadFile) -> BookUploadResponse:
         raw_bytes = await file.read()
-        book_id = self._make_book_id(file.filename or "book.pdf")
+        source_filename = file.filename or "book.pdf"
+        book_id = self._make_book_id(source_filename)
         raw_path = self.settings.raw_dir / f"{book_id}.pdf"
         parsed_path = self.settings.parsed_dir / f"{book_id}.json"
 
         raw_path.write_bytes(raw_bytes)
 
         document = fitz.open(stream=raw_bytes, filetype="pdf")
+        pdf_metadata = sanitize_pdf_metadata(document.metadata)
         pages: list[dict[str, str | int]] = []
         for page_number, page in enumerate(document, start=1):
             text = self._normalize(page.get_text("text"))
             pages.append({"page": page_number, "text": text})
+        title = resolve_book_title(
+            filename=source_filename,
+            book_id=book_id,
+            metadata_title=pdf_metadata.get("title"),
+            page_texts=[str(page.get("text", "")) for page in pages[:5]],
+        )
         document.close()
 
         payload = {
             "book_id": book_id,
-            "title": Path(file.filename or book_id).stem,
+            "title": title,
+            "source_filename": source_filename,
+            "pdf_metadata": pdf_metadata,
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
             "raw_path": str(raw_path),
             "parsed_path": str(parsed_path),

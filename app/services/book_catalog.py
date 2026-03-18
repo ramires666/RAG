@@ -4,7 +4,10 @@ import re
 
 from app.config import get_settings
 from app.models.schemas import BookSummary
+from app.services.book_title import resolve_book_title, sanitize_pdf_metadata
 from app.services.page_filter import is_indexable_page
+
+import fitz
 
 
 PAGE_RE = re.compile(r"#page=(\d+)")
@@ -22,6 +25,7 @@ class BookCatalog:
                 continue
 
             book_id = str(payload.get("book_id", parsed_path.stem))
+            title = self._refresh_title(payload, parsed_path, book_id)
             index_path = self.settings.index_dir / f"{book_id}.indexed.json"
             index_payload = self._load_json(index_path) if index_path.exists() else {}
             progress = self._progress_stats(book_id, payload)
@@ -31,7 +35,7 @@ class BookCatalog:
             books.append(
                 BookSummary(
                     book_id=book_id,
-                    title=str(payload.get("title", book_id)),
+                    title=title,
                     pages=len(payload.get("pages", [])),
                     indexable_pages=progress["total_docs"],
                     status=status,
@@ -50,11 +54,48 @@ class BookCatalog:
             )
         return books
 
+    def _refresh_title(self, payload: dict, parsed_path: Path, book_id: str) -> str:
+        metadata = payload.get("pdf_metadata")
+        if not isinstance(metadata, dict) or not metadata.get("title"):
+            metadata = self._load_pdf_metadata(str(payload.get("raw_path", "")))
+            if metadata and metadata != payload.get("pdf_metadata"):
+                payload["pdf_metadata"] = metadata
+
+        title = resolve_book_title(
+            filename=str(payload.get("source_filename", "")),
+            book_id=book_id,
+            current_title=str(payload.get("title", "")),
+            metadata_title=str((metadata or {}).get("title", "")),
+            page_texts=[str(page.get("text", "")) for page in payload.get("pages", [])[:5]],
+        )
+        if title != str(payload.get("title", "")):
+            payload["title"] = title
+            self._save_json(parsed_path, payload)
+        elif metadata and metadata != payload.get("pdf_metadata"):
+            self._save_json(parsed_path, payload)
+        return title
+
     def _load_json(self, path: Path) -> dict | None:
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             return None
+
+    def _save_json(self, path: Path, payload: dict) -> None:
+        try:
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError:
+            return
+
+    def _load_pdf_metadata(self, raw_path: str) -> dict[str, str]:
+        path = Path(raw_path)
+        if not path.exists():
+            return {}
+        try:
+            with fitz.open(path) as document:
+                return sanitize_pdf_metadata(document.metadata)
+        except (RuntimeError, OSError, ValueError):
+            return {}
 
     def _draft_status(self, progress: dict[str, int | float | None]) -> str | None:
         total_docs = int(progress["total_docs"])

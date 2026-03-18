@@ -28,8 +28,8 @@
       }
 
       .shell {
-        width: min(90vw, 1800px);
-        max-width: none;
+        width: 90vw;
+        max-width: 90vw;
         margin: 0 auto;
         padding: 24px;
       }
@@ -106,12 +106,13 @@
 
       .workspace {
         display: grid;
-        grid-template-columns: minmax(420px, 1.05fr) minmax(760px, 1.75fr);
+        grid-template-columns: minmax(360px, 0.85fr) minmax(0, 2.15fr);
         gap: 18px;
       }
 
       .sidebar, .chat {
         padding: 20px;
+        min-width: 0;
       }
 
       .section-title {
@@ -276,6 +277,7 @@
 
       .answer-text {
         line-height: 1.62;
+        overflow-x: auto;
       }
 
       .answer-text > :first-child {
@@ -313,6 +315,61 @@
         background: rgba(31, 42, 48, 0.08);
         font-family: "Cascadia Code", "Consolas", monospace;
         font-size: 0.94em;
+      }
+
+      .answer-text pre {
+        margin: 0 0 14px;
+        padding: 14px 16px;
+        border-radius: 16px;
+        border: 1px solid var(--line);
+        background: #f2ebde;
+        overflow-x: auto;
+        white-space: pre;
+      }
+
+      .answer-text pre code {
+        display: block;
+        padding: 0;
+        border-radius: 0;
+        background: transparent;
+      }
+
+      .answer-text .table-wrap {
+        margin: 0 0 14px;
+        overflow-x: auto;
+      }
+
+      .answer-text table {
+        width: 100%;
+        min-width: 560px;
+        border-collapse: collapse;
+        background: rgba(255,255,255,0.76);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+      }
+
+      .answer-text th,
+      .answer-text td {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+        border-right: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .answer-text th:last-child,
+      .answer-text td:last-child {
+        border-right: none;
+      }
+
+      .answer-text tbody tr:last-child td {
+        border-bottom: none;
+      }
+
+      .answer-text th {
+        background: rgba(14, 124, 107, 0.08);
+        font-weight: 800;
       }
 
       .answer-text a {
@@ -659,6 +716,21 @@
       function setSidebarStatus(message) { ui.sidebarStatus.textContent = message; }
       function setChatStatus(message) { ui.chatStatus.textContent = message; }
 
+      function getBookLabel(bookId) {
+        const book = state.books.find((item) => item.book_id === bookId);
+        return book ? `${book.title} [${book.book_id}]` : bookId || "выбранную книгу";
+      }
+
+      function confirmDangerousAction(message, cancelStatus) {
+        if (window.confirm(message)) {
+          return true;
+        }
+        if (cancelStatus) {
+          setSidebarStatus(cancelStatus);
+        }
+        return false;
+      }
+
       const MATH_PLACEHOLDER_RE = /@@RAG_MATH_(\d+)@@/g;
 
       function escapeHtml(value) {
@@ -822,6 +894,35 @@
         return html;
       }
 
+      function isMarkdownTableSeparator(source) {
+        return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(source);
+      }
+
+      function splitMarkdownTableRow(source) {
+        let line = String(source ?? "").trim();
+        if (line.startsWith("|")) {
+          line = line.slice(1);
+        }
+        if (line.endsWith("|")) {
+          line = line.slice(0, -1);
+        }
+        return line.split("|").map((cell) => cell.trim());
+      }
+
+      function renderMarkdownTable(headers, rows, segments) {
+        const headHtml = headers
+          .map((cell) => `<th>${renderInlineMarkdown(cell, segments)}</th>`)
+          .join("");
+        const bodyHtml = rows
+          .map((row) => {
+            const cells = row.map((cell) => `<td>${renderInlineMarkdown(cell, segments)}</td>`).join("");
+            return `<tr>${cells}</tr>`;
+          })
+          .join("");
+
+        return `<div class="table-wrap"><table><thead><tr>${headHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`;
+      }
+
       function renderRichText(source) {
         const normalized = String(source ?? "").replace(/\r\n?/g, "\n").trim();
         if (!normalized) {
@@ -833,6 +934,7 @@
         const blocks = [];
         let paragraph = [];
         let list = null;
+        let codeBlock = null;
 
         function flushParagraph() {
           if (!paragraph.length) {
@@ -854,12 +956,38 @@
           list = null;
         }
 
-        for (const rawLine of lines) {
+        function flushCodeBlock() {
+          if (!codeBlock) {
+            return;
+          }
+          blocks.push(`<pre><code>${escapeHtml(codeBlock.join("\n"))}</code></pre>`);
+          codeBlock = null;
+        }
+
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+          const rawLine = lines[lineIndex];
           const line = rawLine.trim();
+
+          if (line.startsWith("```")) {
+            flushParagraph();
+            flushList();
+            if (codeBlock) {
+              flushCodeBlock();
+            } else {
+              codeBlock = [];
+            }
+            continue;
+          }
+
+          if (codeBlock) {
+            codeBlock.push(rawLine);
+            continue;
+          }
 
           if (!line) {
             flushParagraph();
             flushList();
+            flushCodeBlock();
             continue;
           }
 
@@ -869,6 +997,7 @@
             if (segment?.display) {
               flushParagraph();
               flushList();
+              flushCodeBlock();
               blocks.push(renderMathSegment(segment));
               continue;
             }
@@ -878,8 +1007,32 @@
           if (heading) {
             flushParagraph();
             flushList();
+            flushCodeBlock();
             const level = heading[1].length;
             blocks.push(`<h${level}>${renderInlineMarkdown(heading[2], segments)}</h${level}>`);
+            continue;
+          }
+
+          const nextLine = lines[lineIndex + 1]?.trim() || "";
+          if (rawLine.includes("|") && isMarkdownTableSeparator(nextLine)) {
+            flushParagraph();
+            flushList();
+            flushCodeBlock();
+            const headers = splitMarkdownTableRow(rawLine);
+            const rows = [];
+            let cursor = lineIndex + 2;
+
+            while (cursor < lines.length) {
+              const tableLine = lines[cursor].trim();
+              if (!tableLine || !lines[cursor].includes("|")) {
+                break;
+              }
+              rows.push(splitMarkdownTableRow(lines[cursor]));
+              cursor += 1;
+            }
+
+            blocks.push(renderMarkdownTable(headers, rows, segments));
+            lineIndex = cursor - 1;
             continue;
           }
 
@@ -902,6 +1055,7 @@
 
         flushParagraph();
         flushList();
+        flushCodeBlock();
         return blocks.join("");
       }
 
@@ -1161,6 +1315,14 @@
           return;
         }
 
+        const bookLabel = getBookLabel(bookId);
+        if (!confirmDangerousAction(
+          `Удалить индекс книги ${bookLabel}?\n\nЭто действие нельзя отменить.`,
+          "Удаление индекса отменено.",
+        )) {
+          return;
+        }
+
         setSidebarStatus(`Удаляю индекс ${bookId}...`);
         const data = await fetchJson(`/books/${bookId}/index`, { method: "DELETE" });
         if (state.pollingBookId === bookId) {
@@ -1174,6 +1336,14 @@
       async function reindexBook(bookId = state.selectedBookId) {
         if (!bookId) {
           setSidebarStatus("Сначала выбери книгу.");
+          return;
+        }
+
+        const bookLabel = getBookLabel(bookId);
+        if (!confirmDangerousAction(
+          `Перезапустить индекс для книги ${bookLabel}?\n\nТекущий индекс будет пересобран заново.`,
+          "Переиндексация отменена.",
+        )) {
           return;
         }
 
