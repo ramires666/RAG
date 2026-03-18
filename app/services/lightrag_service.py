@@ -17,7 +17,7 @@ from lightrag.llm.openai import openai_complete_if_cache, openai_embed
 from lightrag.utils import EmbeddingFunc
 
 from app.config import get_settings
-from app.models.schemas import AskResponse, BookIndexResponse, Citation, RepairPlanResponse, SettingsStatus
+from app.models.schemas import AskResponse, BookIndexResponse, Citation, GlobalGraphStatus, RepairPlanResponse, SettingsStatus
 from app.services.book_catalog import BookCatalog
 from app.services.local_embeddings import make_hash_embedding_func
 from app.services.page_filter import is_indexable_page
@@ -39,6 +39,7 @@ DRAFT_GLOBAL_HINTS = (
 )
 LOGGER = logging.getLogger(__name__)
 LLM_RESTART_LOCK = asyncio.Lock()
+GLOBAL_GRAPH_ID = "__global__"
 
 
 class LightRAGService:
@@ -76,6 +77,106 @@ class LightRAGService:
         removed = self._delete_index_artifacts(book_id)
         detail = "Index deleted." if removed else "No existing index artifacts were found."
         return BookIndexResponse(book_id=book_id, status="deleted", detail=detail)
+
+    async def delete_global_graph(self) -> BookIndexResponse:
+        removed = self._delete_global_index_artifacts()
+        detail = "Общий граф удален." if removed else "Артефакты общего графа не найдены."
+        return BookIndexResponse(book_id=GLOBAL_GRAPH_ID, status="deleted", detail=detail)
+
+    def get_global_graph_status(self) -> GlobalGraphStatus:
+        marker = self._load_json_file(self._global_index_marker()) or {}
+        health = self._index_health_for_workdir(self._global_workdir())
+
+        if marker:
+            status = str(marker.get("status", "indexed"))
+            detail = str(marker.get("detail", "Общий граф готов к запросам."))
+        elif health["chunk_count"] > 0:
+            status = "draft"
+            detail = "Общий граф частично существует, но индекс-маркер не найден."
+        else:
+            status = "missing"
+            detail = "Общий граф пока не построен."
+
+        return GlobalGraphStatus(
+            status=status,
+            detail=detail,
+            books_count=int(marker.get("books_count", 0)),
+            indexed_pages=int(marker.get("indexed_pages", 0)),
+            chunk_count=health["chunk_count"],
+            entity_count=self._sum_count_store(self._global_workdir() / "kv_store_full_entities.json"),
+            relation_count=self._sum_count_store(self._global_workdir() / "kv_store_full_relations.json"),
+            indexed_at=marker.get("indexed_at"),
+        )
+
+    async def rebuild_global_graph(self) -> BookIndexResponse:
+        if not self.settings.openai_base_url or not self.settings.openai_model:
+            return BookIndexResponse(
+                book_id=GLOBAL_GRAPH_ID,
+                status="error",
+                detail="LLM config is missing. Set OPENAI_BASE_URL and OPENAI_MODEL in .env.",
+            )
+
+        payloads = self._load_all_parsed_books()
+        if not payloads:
+            return BookIndexResponse(
+                book_id=GLOBAL_GRAPH_ID,
+                status="error",
+                detail="Нет загруженных книг для построения общего графа.",
+            )
+
+        documents: list[str] = []
+        ids: list[str] = []
+        file_paths: list[str] = []
+        books_count = 0
+        for payload in payloads:
+            page_docs, page_ids, page_paths = self._build_page_documents(payload)
+            if not page_docs:
+                continue
+            books_count += 1
+            documents.extend(page_docs)
+            ids.extend(page_ids)
+            file_paths.extend(page_paths)
+
+        if not documents:
+            return BookIndexResponse(
+                book_id=GLOBAL_GRAPH_ID,
+                status="error",
+                detail="В загруженных книгах не найдено текстовых страниц для общего графа.",
+            )
+
+        working_dir = self._global_workdir()
+        self._delete_global_index_artifacts()
+        working_dir.mkdir(parents=True, exist_ok=True)
+
+        rag = self._create_rag(working_dir)
+        try:
+            async with self._managed_rag(rag):
+                await rag.ainsert(documents, ids=ids, file_paths=file_paths)
+        except Exception as exc:
+            return BookIndexResponse(
+                book_id=GLOBAL_GRAPH_ID,
+                status="error",
+                detail=f"Построение общего графа не удалось: {exc}",
+            )
+
+        health = self._index_health_for_workdir(working_dir)
+        if health["chunk_count"] == 0 or health["failed_docs"] > 0:
+            return BookIndexResponse(
+                book_id=GLOBAL_GRAPH_ID,
+                status="error",
+                detail=(
+                    "Общий граф построился не полностью. "
+                    f"chunks={health['chunk_count']}, failed_docs={health['failed_docs']}, "
+                    f"processed_docs={health['processed_docs']}."
+                ),
+            )
+
+        self._write_global_index_marker(books_count=books_count, indexed_pages=len(documents), health=health)
+        return BookIndexResponse(
+            book_id=GLOBAL_GRAPH_ID,
+            status="indexed",
+            detail=f"Общий граф построен по {books_count} книгам и {len(documents)} текстовым страницам.",
+        )
 
     def scan_repair_plan(self, book_id: str) -> RepairPlanResponse:
         payload = self._load_parsed_book(book_id)
@@ -404,6 +505,48 @@ class LightRAGService:
         answer = llm_response.get("content") or "No relevant context found for the query."
         citations = self._extract_citations(result.get("data", {}), book_id)
 
+        return AskResponse(
+            mode_requested=requested_mode,  # type: ignore[arg-type]
+            mode_used=normalized_mode,
+            answer=answer,
+            citations=citations,
+        )
+
+    async def query_global(self, question: str, mode: str, requested_mode: str) -> AskResponse:
+        normalized_mode = self._normalize_mode(mode)
+        marker = self._load_json_file(self._global_index_marker()) or {}
+        health = self._index_health_for_workdir(self._global_workdir())
+        if not marker and health["chunk_count"] == 0:
+            return AskResponse(
+                mode_requested=requested_mode,  # type: ignore[arg-type]
+                mode_used=normalized_mode,
+                answer="Общий граф пока не построен. Сначала нажми кнопку пересборки общего графа.",
+                citations=[],
+            )
+
+        rag = self._create_rag(self._global_workdir())
+        try:
+            async with self._managed_rag(rag):
+                result = await rag.aquery_llm(
+                    question,
+                    param=QueryParam(
+                        mode=normalized_mode,
+                        response_type="Multiple Paragraphs",
+                        stream=False,
+                        enable_rerank=False,
+                    ),
+                )
+        except Exception as exc:
+            return AskResponse(
+                mode_requested=requested_mode,  # type: ignore[arg-type]
+                mode_used=normalized_mode,
+                answer=f"Запрос к общему графу не удался: {exc}",
+                citations=[],
+            )
+
+        llm_response = result.get("llm_response", {})
+        answer = llm_response.get("content") or "Не удалось найти релевантный контекст в общем графе."
+        citations = self._extract_citations(result.get("data", {}), None)
         return AskResponse(
             mode_requested=requested_mode,  # type: ignore[arg-type]
             mode_used=normalized_mode,
@@ -769,8 +912,24 @@ class LightRAGService:
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             return None
 
+    def _load_all_parsed_books(self) -> list[dict[str, Any]]:
+        payloads: list[dict[str, Any]] = []
+        for parsed_path in sorted(self.settings.parsed_dir.glob("*.json")):
+            payload = self._load_json_file(parsed_path)
+            if payload is not None:
+                payloads.append(payload)
+        return payloads
+
+    def _load_json_file(self, path: Path) -> dict[str, Any] | None:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return None
+
     def _index_health(self, book_id: str) -> dict[str, int]:
-        working_dir = self._book_workdir(book_id)
+        return self._index_health_for_workdir(self._book_workdir(book_id))
+
+    def _index_health_for_workdir(self, working_dir: Path) -> dict[str, int]:
         doc_status_path = working_dir / "kv_store_doc_status.json"
         text_chunks_path = working_dir / "kv_store_text_chunks.json"
 
@@ -1028,7 +1187,7 @@ class LightRAGService:
                 continue
         return total
 
-    def _extract_citations(self, data: dict[str, Any], book_id: str) -> list[Citation]:
+    def _extract_citations(self, data: dict[str, Any], book_id: str | None) -> list[Citation]:
         references = data.get("references", [])
         chunks = data.get("chunks", [])
 
@@ -1044,16 +1203,27 @@ class LightRAGService:
             ref_id = str(ref.get("reference_id", ""))
             file_path = str(ref.get("file_path", ""))
             page = self._extract_page_number(file_path)
-            snippet = self._clean_snippet(ref_to_snippets.get(ref_id, [""])[0])[:240]
-            citations.append(Citation(book_id=book_id, page=page, snippet=snippet))
+            content = ref_to_snippets.get(ref_id, [""])[0]
+            snippet = self._clean_snippet(content)[:240]
+            citations.append(
+                Citation(
+                    book_id=self._extract_book_id_from_file_path(file_path, book_id),
+                    book_title=self._extract_book_title_from_content(content),
+                    page=page,
+                    snippet=snippet,
+                )
+            )
 
         if not citations and chunks:
             first_chunk = chunks[0]
+            content = str(first_chunk.get("content", ""))
+            file_path = str(first_chunk.get("file_path", ""))
             citations.append(
                 Citation(
-                    book_id=book_id,
-                    page=self._extract_page_number(str(first_chunk.get("file_path", ""))),
-                    snippet=self._clean_snippet(str(first_chunk.get("content", "")))[:240],
+                    book_id=self._extract_book_id_from_file_path(file_path, book_id),
+                    book_title=self._extract_book_title_from_content(content),
+                    page=self._extract_page_number(file_path),
+                    snippet=self._clean_snippet(content)[:240],
                 )
             )
 
@@ -1067,6 +1237,18 @@ class LightRAGService:
         snippet = re.sub(r"^\s*Страница:\s*\d+(?:\n|$)", "", snippet, flags=re.IGNORECASE)
         return snippet.strip()
 
+    def _extract_book_title_from_content(self, content: str) -> str | None:
+        match = re.search(r"^\s*(?:Book|Книга):\s*(.+?)\s*(?:\n|$)", str(content or ""), flags=re.IGNORECASE)
+        if not match:
+            return None
+        title = match.group(1).strip()
+        return title or None
+
+    def _extract_book_id_from_file_path(self, file_path: str, fallback: str | None) -> str:
+        source = str(file_path or "").split("#", 1)[0]
+        stem = Path(source).stem
+        return stem or fallback or GLOBAL_GRAPH_ID
+
     def _extract_page_number(self, file_path: str) -> int | None:
         match = PAGE_RE.search(file_path)
         if match:
@@ -1075,6 +1257,12 @@ class LightRAGService:
 
     def _book_workdir(self, book_id: str) -> Path:
         return self.settings.lightrag_workdir / book_id
+
+    def _global_workdir(self) -> Path:
+        return self.settings.lightrag_workdir / GLOBAL_GRAPH_ID
+
+    def _global_index_marker(self) -> Path:
+        return self.settings.index_dir / f"{GLOBAL_GRAPH_ID}.indexed.json"
 
     def _write_index_marker(
         self,
@@ -1105,18 +1293,49 @@ class LightRAGService:
             encoding="utf-8",
         )
 
-    def _delete_index_artifacts(self, book_id: str) -> bool:
-        removed = False
-        working_dir = self._book_workdir(book_id)
-        index_marker = self.settings.index_dir / f"{book_id}.indexed.json"
+    def _write_global_index_marker(self, books_count: int, indexed_pages: int, health: dict[str, int]) -> None:
+        self._global_index_marker().write_text(
+            json.dumps(
+                {
+                    "book_id": GLOBAL_GRAPH_ID,
+                    "title": "Общий граф книг",
+                    "books_count": books_count,
+                    "indexed_pages": indexed_pages,
+                    "indexed_at": datetime.now(timezone.utc).isoformat(),
+                    "status": "indexed",
+                    "detail": "Общий граф готов к запросам.",
+                    "working_dir": str(self._global_workdir()),
+                    "embedding_backend": self.settings_status().embedding_backend,
+                    "chunk_count": health["chunk_count"],
+                    "processed_docs": health["processed_docs"],
+                    "failed_docs": health["failed_docs"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
+    def _delete_index_artifacts(self, book_id: str) -> bool:
+        return self._delete_workdir_and_marker(
+            working_dir=self._book_workdir(book_id),
+            index_marker=self.settings.index_dir / f"{book_id}.indexed.json",
+        )
+
+    def _delete_global_index_artifacts(self) -> bool:
+        return self._delete_workdir_and_marker(
+            working_dir=self._global_workdir(),
+            index_marker=self._global_index_marker(),
+        )
+
+    def _delete_workdir_and_marker(self, working_dir: Path, index_marker: Path) -> bool:
+        removed = False
         if working_dir.exists():
             shutil.rmtree(working_dir)
             removed = True
         if index_marker.exists():
             index_marker.unlink()
             removed = True
-
         return removed
 
     def _normalize_mode(self, mode: str) -> str:

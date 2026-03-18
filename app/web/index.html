@@ -115,6 +115,11 @@
         min-width: 0;
       }
 
+      .sidebar {
+        display: flex;
+        flex-direction: column;
+      }
+
       .section-title {
         margin: 0 0 12px;
         font-size: 15px;
@@ -175,6 +180,10 @@
         margin-top: 12px;
       }
 
+      .button-row-single {
+        grid-template-columns: 1fr;
+      }
+
       .demo-block {
         margin-top: 16px;
       }
@@ -227,6 +236,14 @@
         padding: 8px;
         max-height: 480px;
         overflow: auto;
+      }
+
+      .actions-box {
+        margin-top: auto;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(255,255,255,0.72);
       }
 
       .book {
@@ -524,64 +541,80 @@
 
         <div class="panel hero-side">
           <div class="stat">
-            <div class="stat-label">LLM backend</div>
-            <div class="stat-value" id="llmStatus">checking…</div>
+            <div class="stat-label">LLM</div>
+            <div class="stat-value" id="llmStatus">проверка…</div>
           </div>
           <div class="stat">
-            <div class="stat-label">Embedding backend</div>
-            <div class="stat-value" id="embeddingStatus">checking…</div>
+            <div class="stat-label">Эмбеддинги</div>
+            <div class="stat-value" id="embeddingStatus">проверка…</div>
           </div>
           <div class="stat">
-            <div class="stat-label">Selected book</div>
-            <div class="stat-value" id="selectedBookLabel">none</div>
+            <div class="stat-label">Выбранная книга</div>
+            <div class="stat-value" id="selectedBookLabel">не выбрана</div>
           </div>
         </div>
       </section>
 
       <section class="workspace">
         <aside class="panel sidebar">
-          <h2 class="section-title">Library</h2>
+          <h2 class="section-title">Библиотека</h2>
 
           <div class="upload-box">
             <label for="pdfFile">Новая книга (PDF)</label>
             <input id="pdfFile" type="file" accept="application/pdf" />
-            <div class="button-row">
-              <button id="uploadBtn" class="primary">Upload</button>
-              <button id="refreshBtn" class="secondary">Refresh</button>
-            </div>
-            <div class="button-row">
-              <button id="deleteIndexBtn" class="secondary">Delete Selected Index</button>
-              <button id="reindexBtn" class="secondary">Delete + Reindex</button>
-            </div>
-            <div class="button-row">
-              <button id="repairBtn" class="secondary">Repair Missing/Failed</button>
-            </div>
           </div>
 
           <div class="status-bar" id="sidebarStatus">Готово.</div>
 
           <div class="progress-box">
-            <h2 class="section-title" style="margin-bottom: 12px;">Index Progress</h2>
-            <div id="indexStatusPill" class="pill">idle</div>
+            <h2 class="section-title" style="margin-bottom: 12px;">Прогресс индексации</h2>
+            <div id="indexStatusPill" class="pill">ожидание</div>
             <div class="progress-track" style="margin-top: 12px;">
               <div id="indexProgressFill" class="progress-fill"></div>
             </div>
             <div id="indexProgressMeta" class="progress-meta">Нет активной индексации.</div>
             <div id="indexStatsMeta" class="progress-meta">Статистика появится после старта индексации.</div>
-            <div id="indexWarningsMeta" class="progress-meta">Format warnings будут показаны здесь.</div>
-            <div id="indexTimeMeta" class="progress-meta">ETA появится, когда накопится достаточно данных.</div>
+            <div id="indexWarningsMeta" class="progress-meta">Предупреждения формата будут показаны здесь.</div>
+            <div id="indexTimeMeta" class="progress-meta">Оценка времени появится, когда накопится достаточно данных.</div>
             <div id="gpuStatus" class="progress-meta">GPU: данные недоступны.</div>
           </div>
 
-          <h2 class="section-title" style="margin-top: 20px;">Books</h2>
+          <h2 class="section-title" style="margin-top: 20px;">Книги</h2>
           <div id="bookList" class="book-list"></div>
+
+          <div class="actions-box" style="margin-top: 20px;">
+            <h2 class="section-title" style="margin-bottom: 12px;">Действия</h2>
+            <div class="button-row">
+              <button id="uploadBtn" class="primary">Загрузить</button>
+              <button id="refreshBtn" class="secondary">Обновить</button>
+            </div>
+            <div class="button-row">
+              <button id="deleteIndexBtn" class="secondary">Удалить индекс</button>
+              <button id="reindexBtn" class="secondary">Пересобрать индекс</button>
+            </div>
+            <div class="button-row">
+              <button id="repairBtn" class="secondary">Восстановить индекс</button>
+              <button id="indexBtn" class="secondary">Индексировать выбранную</button>
+            </div>
+            <div class="button-row">
+              <button id="rebuildGlobalBtn" class="primary">Пересобрать общий граф</button>
+              <button id="deleteGlobalBtn" class="secondary">Удалить общий граф</button>
+            </div>
+            <div id="globalGraphStatus" class="status-bar" style="margin-top: 12px;">Общий граф пока не построен.</div>
+          </div>
         </aside>
 
         <main class="panel chat">
-          <h2 class="section-title">Ask</h2>
+          <h2 class="section-title">Запрос</h2>
           <div class="question-box">
             <div class="question-grid">
               <div>
+                <label for="scopeSelect">Область поиска</label>
+                <select id="scopeSelect">
+                  <option value="book" selected>Только выбранная книга</option>
+                  <option value="global">Общий граф всех книг</option>
+                </select>
+
                 <label for="askBookSelect">Книга для запроса</label>
                 <select id="askBookSelect"></select>
 
@@ -605,10 +638,8 @@
               </div>
             </div>
 
-            <div class="button-row">
-              <button id="askBtn" class="primary">Ask</button>
-              <button id="indexBtn" class="secondary">Reindex Selected Book</button>
-              <button id="repairAskBtn" class="secondary">Repair Selected Book</button>
+            <div class="button-row button-row-single">
+              <button id="askBtn" class="primary">Спросить</button>
             </div>
 
             <div class="demo-block">
@@ -653,7 +684,7 @@
           <div class="status-bar" id="chatStatus">Выбери книгу, затем загрузи или проиндексируй ее.</div>
 
           <div class="answer-box">
-            <div id="answerMode" class="pill">no answer yet</div>
+            <div id="answerMode" class="pill">ответа пока нет</div>
             <div id="answerBook" class="status-bar" style="margin-top: 12px;">Книга запроса пока не выбрана.</div>
             <div id="answerText" class="answer-text" style="margin-top: 16px;">
               Здесь появится ответ модели.
@@ -685,11 +716,13 @@
         llmStatus: document.getElementById("llmStatus"),
         embeddingStatus: document.getElementById("embeddingStatus"),
         selectedBookLabel: document.getElementById("selectedBookLabel"),
+        scopeSelect: document.getElementById("scopeSelect"),
         askBookSelect: document.getElementById("askBookSelect"),
         pdfFile: document.getElementById("pdfFile"),
         questionInput: document.getElementById("questionInput"),
         modeSelect: document.getElementById("modeSelect"),
         demoQuestions: document.getElementById("demoQuestions"),
+        globalGraphStatus: document.getElementById("globalGraphStatus"),
         uploadBtn: document.getElementById("uploadBtn"),
         refreshBtn: document.getElementById("refreshBtn"),
         askBtn: document.getElementById("askBtn"),
@@ -697,7 +730,8 @@
         deleteIndexBtn: document.getElementById("deleteIndexBtn"),
         reindexBtn: document.getElementById("reindexBtn"),
         repairBtn: document.getElementById("repairBtn"),
-        repairAskBtn: document.getElementById("repairAskBtn"),
+        rebuildGlobalBtn: document.getElementById("rebuildGlobalBtn"),
+        deleteGlobalBtn: document.getElementById("deleteGlobalBtn"),
       };
 
       async function fetchJson(url, options = {}) {
@@ -715,6 +749,24 @@
 
       function setSidebarStatus(message) { ui.sidebarStatus.textContent = message; }
       function setChatStatus(message) { ui.chatStatus.textContent = message; }
+
+      function formatIndexStatusLabel(status) {
+        const labels = {
+          idle: "ожидание",
+          queued: "в очереди",
+          running: "в работе",
+          indexed: "готово",
+          uploaded: "загружена",
+          draft: "черновой",
+          indexing: "индексация",
+          deleted: "удален",
+          error: "ошибка",
+          clean: "чисто",
+          repairable: "требует ремонта",
+          missing: "не построен",
+        };
+        return labels[status] || status;
+      }
 
       function getBookLabel(bookId) {
         const book = state.books.find((item) => item.book_id === bookId);
@@ -1082,12 +1134,12 @@
 
       function renderIndexStatus(data) {
         if (!data) {
-          ui.indexStatusPill.textContent = "idle";
+          ui.indexStatusPill.textContent = "ожидание";
           ui.indexProgressFill.style.width = "0%";
           ui.indexProgressMeta.textContent = "Нет активной индексации.";
           ui.indexStatsMeta.textContent = "Статистика появится после старта индексации.";
-          ui.indexWarningsMeta.textContent = "Format warnings будут показаны здесь.";
-          ui.indexTimeMeta.textContent = "ETA появится, когда накопится достаточно данных.";
+          ui.indexWarningsMeta.textContent = "Предупреждения формата будут показаны здесь.";
+          ui.indexTimeMeta.textContent = "Оценка времени появится, когда накопится достаточно данных.";
           ui.gpuStatus.textContent = "GPU: данные недоступны.";
           return;
         }
@@ -1100,20 +1152,20 @@
         }
         percent = Math.max(0, Math.min(100, percent));
 
-        ui.indexStatusPill.textContent = data.status;
+        ui.indexStatusPill.textContent = formatIndexStatusLabel(data.status);
         ui.indexProgressFill.style.width = `${percent}%`;
         ui.indexProgressMeta.textContent =
-          `${data.detail} ${total > 0 ? `• ${completed}/${total} pages` : ""} • ${data.progress_percent ?? percent}%`;
+          `${data.detail} ${total > 0 ? `• ${completed}/${total} стр.` : ""} • ${data.progress_percent ?? percent}%`;
         ui.indexStatsMeta.textContent =
-          `Pages: ${completed}/${total || "?"} • Remaining: ${data.remaining_docs || 0} • Chunks: ${data.chunk_count || 0} • Entities: ${data.entity_count || 0} • Relations: ${data.relation_count || 0}`;
+          `Страницы: ${completed}/${total || "?"} • Осталось: ${data.remaining_docs || 0} • Чанки: ${data.chunk_count || 0} • Сущности: ${data.entity_count || 0} • Связи: ${data.relation_count || 0}`;
         ui.indexWarningsMeta.textContent =
-          `Format errors: ${data.format_error_count || 0} • Relation: ${data.relation_format_error_count || 0} • Entity: ${data.entity_format_error_count || 0} • Warning chunks: ${data.warning_chunk_count || 0}${data.last_warning ? ` • Last: ${String(data.last_warning).slice(0, 180)}` : ""}`;
+          `Ошибки формата: ${data.format_error_count || 0} • Связи: ${data.relation_format_error_count || 0} • Сущности: ${data.entity_format_error_count || 0} • Проблемные чанки: ${data.warning_chunk_count || 0}${data.last_warning ? ` • Последнее: ${String(data.last_warning).slice(0, 180)}` : ""}`;
         ui.indexTimeMeta.textContent =
-          `Elapsed: ${formatDuration(data.elapsed_seconds)} • Speed: ${data.pages_per_minute ?? "уточняется"} pages/min • ETA: ${formatDuration(data.eta_seconds)}`;
+          `Прошло: ${formatDuration(data.elapsed_seconds)} • Скорость: ${data.pages_per_minute ?? "уточняется"} стр./мин • Осталось: ${formatDuration(data.eta_seconds)}`;
 
         if (data.gpu && data.gpu.name) {
           ui.gpuStatus.textContent =
-            `GPU: ${data.gpu.name} • load ${data.gpu.utilization_gpu ?? "?"}% • VRAM ${data.gpu.memory_used_mb ?? "?"}/${data.gpu.memory_total_mb ?? "?"} MB`;
+            `GPU: ${data.gpu.name} • загрузка ${data.gpu.utilization_gpu ?? "?"}% • VRAM ${data.gpu.memory_used_mb ?? "?"}/${data.gpu.memory_total_mb ?? "?"} MB`;
         } else {
           ui.gpuStatus.textContent = "GPU: данные недоступны.";
         }
@@ -1168,8 +1220,9 @@
         }
         state.selectedBookId = bookId;
         const book = state.books.find((item) => item.book_id === bookId);
-        ui.selectedBookLabel.textContent = book ? book.title : "none";
+        ui.selectedBookLabel.textContent = book ? book.title : "не выбрана";
         ui.askBookSelect.value = bookId || "";
+        renderScopeState();
         renderBooks();
         refreshIndexStatus(bookId).catch((error) => setSidebarStatus(error.message));
       }
@@ -1194,6 +1247,7 @@
         }
 
         ui.askBookSelect.value = state.selectedBookId || state.books[0].book_id;
+        renderScopeState();
       }
 
       function renderBooks() {
@@ -1214,15 +1268,12 @@
           item.className = `book ${book.book_id === state.selectedBookId ? "active" : ""}`;
           item.innerHTML = `
             <div class="book-title">${book.title}</div>
-            <div class="book-meta">${book.pages} pages • status: ${book.status}</div>
+            <div class="book-meta">${book.pages} стр. • статус: ${formatIndexStatusLabel(book.status)}</div>
             <div class="book-meta">${progressMeta}</div>
             <div class="book-meta">чанков: ${book.chunk_count || 0}</div>
-            <div class="book-meta">${book.indexed_at ? `indexed: ${new Date(book.indexed_at).toLocaleString()}` : "not indexed yet"}</div>
+            <div class="book-meta">${book.indexed_at ? `индекс: ${new Date(book.indexed_at).toLocaleString()}` : "ещё не индексирована"}</div>
             <div class="book-actions">
-              <button class="secondary" data-action="select" data-book="${book.book_id}">Select</button>
-              <button class="primary" data-action="reindex" data-book="${book.book_id}">Reindex</button>
-              <button class="secondary" data-action="repair" data-book="${book.book_id}">Repair</button>
-              <button class="secondary" data-action="delete-index" data-book="${book.book_id}">Delete Index</button>
+              <button class="secondary" data-action="select" data-book="${book.book_id}">Выбрать</button>
             </div>
           `;
           ui.bookList.appendChild(item);
@@ -1231,10 +1282,13 @@
 
       function renderAnswer(data) {
         const selectedBook = state.books.find((item) => item.book_id === state.selectedBookId);
-        ui.answerMode.textContent = `requested ${data.mode_requested} • used ${data.mode_used}`;
-        ui.answerBook.textContent = selectedBook
-          ? `Ответ построен по книге: ${selectedBook.title} [${selectedBook.book_id}]`
-          : "Книга для ответа не определена.";
+        const queryScope = ui.scopeSelect.value || "book";
+        ui.answerMode.textContent = `режим: ${data.mode_requested} • использован: ${data.mode_used}`;
+        ui.answerBook.textContent = queryScope === "global"
+          ? "Ответ построен по общему графу всех книг."
+          : selectedBook
+            ? `Ответ построен по книге: ${selectedBook.title} [${selectedBook.book_id}]`
+            : "Книга для ответа не определена.";
         ui.answerText.innerHTML = renderRichText(data.answer);
         ui.citations.innerHTML = "";
 
@@ -1242,24 +1296,45 @@
           const node = document.createElement("div");
           node.className = "citation";
           const title = document.createElement("strong");
-          title.textContent = `page ${citation.page ?? "?"}`;
+          title.textContent = citation.book_title
+            ? `${citation.book_title} • стр. ${citation.page ?? "?"}`
+            : `Страница ${citation.page ?? "?"}`;
           const snippet = document.createElement("div");
           snippet.style.marginTop = "8px";
           snippet.style.color = "var(--muted)";
           snippet.style.lineHeight = "1.5";
-          snippet.textContent = citation.snippet || "No snippet available.";
+          snippet.textContent = citation.snippet || "Фрагмент недоступен.";
           node.appendChild(title);
           node.appendChild(snippet);
           ui.citations.appendChild(node);
         }
       }
 
+      function renderScopeState() {
+        const isGlobal = (ui.scopeSelect.value || "book") === "global";
+        ui.askBookSelect.disabled = isGlobal || !state.books.length;
+      }
+
+      function renderGlobalGraphStatus(data) {
+        if (!data) {
+          ui.globalGraphStatus.textContent = "Общий граф пока не построен.";
+          return;
+        }
+        ui.globalGraphStatus.textContent =
+          `Общий граф: ${formatIndexStatusLabel(data.status)} • книг: ${data.books_count || 0} • страниц: ${data.indexed_pages || 0} • чанков: ${data.chunk_count || 0}`;
+      }
+
       async function loadSettings() {
         const data = await fetchJson("/settings/status");
         ui.llmStatus.textContent = data.ready_for_query
           ? `${data.llm_model} @ ${data.llm_base_url}`
-          : "LLM config is missing";
+          : "LLM не настроен";
         ui.embeddingStatus.textContent = `${data.embedding_backend}${data.embedding_model ? ` • ${data.embedding_model}` : ""}`;
+      }
+
+      async function loadGlobalGraphStatus() {
+        const data = await fetchJson("/books/graph/status");
+        renderGlobalGraphStatus(data);
       }
 
       async function loadBooks({ refreshStatus = true } = {}) {
@@ -1272,7 +1347,7 @@
           state.selectedBookId = books[0]?.book_id || null;
         }
         ui.selectedBookLabel.textContent =
-          state.books.find((item) => item.book_id === state.selectedBookId)?.title || "none";
+          state.books.find((item) => item.book_id === state.selectedBookId)?.title || "не выбрана";
         renderAskBookOptions();
         renderBooks();
         if (refreshStatus) {
@@ -1385,9 +1460,43 @@
         }
       }
 
+      async function rebuildGlobalGraph() {
+        if (!confirmDangerousAction(
+          "Пересобрать общий граф по всем книгам?\n\nТекущий общий граф будет удален и собран заново.",
+          "Пересборка общего графа отменена.",
+        )) {
+          return;
+        }
+
+        setSidebarStatus("Пересобираю общий граф...");
+        const data = await fetchJson("/books/graph/rebuild", { method: "POST" });
+        setSidebarStatus(data.detail);
+        await loadGlobalGraphStatus();
+      }
+
+      async function deleteGlobalGraph() {
+        if (!confirmDangerousAction(
+          "Удалить общий граф всех книг?\n\nЭто действие нельзя отменить.",
+          "Удаление общего графа отменено.",
+        )) {
+          return;
+        }
+
+        setSidebarStatus("Удаляю общий граф...");
+        const data = await fetchJson("/books/graph", { method: "DELETE" });
+        setSidebarStatus(data.detail);
+        renderGlobalGraphStatus({
+          status: "missing",
+          books_count: 0,
+          indexed_pages: 0,
+          chunk_count: 0,
+        });
+      }
+
       async function askQuestion() {
-        const targetBookId = ui.askBookSelect.value || state.selectedBookId;
-        if (!targetBookId) {
+        const queryScope = ui.scopeSelect.value || "book";
+        const targetBookId = queryScope === "global" ? null : (ui.askBookSelect.value || state.selectedBookId);
+        if (queryScope === "book" && !targetBookId) {
           setChatStatus("Сначала выбери книгу.");
           return;
         }
@@ -1399,14 +1508,23 @@
         }
 
         const selectedBook = state.books.find((item) => item.book_id === targetBookId);
-        setSelectedBook(targetBookId);
-        setChatStatus(selectedBook ? `Выполняю запрос по книге: ${selectedBook.title}` : "Выполняю запрос...");
+        if (targetBookId) {
+          setSelectedBook(targetBookId);
+        }
+        setChatStatus(
+          queryScope === "global"
+            ? "Выполняю запрос по общему графу..."
+            : selectedBook
+              ? `Выполняю запрос по книге: ${selectedBook.title}`
+              : "Выполняю запрос...",
+        );
         const data = await fetchJson("/ask", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             question,
             mode: ui.modeSelect.value,
+            scope: queryScope,
             book_id: targetBookId,
           }),
         });
@@ -1425,17 +1543,19 @@
       ui.uploadBtn.addEventListener("click", () => uploadBook().catch((error) => setSidebarStatus(error.message)));
       ui.refreshBtn.addEventListener("click", () => loadBooks().catch((error) => setSidebarStatus(error.message)));
       ui.askBtn.addEventListener("click", () => askQuestion().catch((error) => setChatStatus(error.message)));
-      ui.indexBtn.addEventListener("click", () => reindexBook().catch((error) => setSidebarStatus(error.message)));
+      ui.indexBtn.addEventListener("click", () => indexBook().catch((error) => setSidebarStatus(error.message)));
       ui.deleteIndexBtn.addEventListener("click", () => deleteIndex().catch((error) => setSidebarStatus(error.message)));
       ui.reindexBtn.addEventListener("click", () => reindexBook().catch((error) => setSidebarStatus(error.message)));
       ui.repairBtn.addEventListener("click", () => repairBook().catch((error) => setSidebarStatus(error.message)));
-      ui.repairAskBtn.addEventListener("click", () => repairBook().catch((error) => setSidebarStatus(error.message)));
+      ui.rebuildGlobalBtn.addEventListener("click", () => rebuildGlobalGraph().catch((error) => setSidebarStatus(error.message)));
+      ui.deleteGlobalBtn.addEventListener("click", () => deleteGlobalGraph().catch((error) => setSidebarStatus(error.message)));
       ui.askBookSelect.addEventListener("change", (event) => {
         const bookId = event.target.value;
         if (bookId) {
           setSelectedBook(bookId);
         }
       });
+      ui.scopeSelect.addEventListener("change", () => renderScopeState());
 
       ui.bookList.addEventListener("click", (event) => {
         const target = event.target.closest("button");
@@ -1444,18 +1564,6 @@
         const action = target.dataset.action;
         if (action === "select") {
           setSelectedBook(bookId);
-          return;
-        }
-        if (action === "reindex") {
-          reindexBook(bookId).catch((error) => setSidebarStatus(error.message));
-          return;
-        }
-        if (action === "repair") {
-          repairBook(bookId).catch((error) => setSidebarStatus(error.message));
-          return;
-        }
-        if (action === "delete-index") {
-          deleteIndex(bookId).catch((error) => setSidebarStatus(error.message));
         }
       });
 
@@ -1467,7 +1575,7 @@
         askDemoQuestion(question, mode).catch((error) => setChatStatus(error.message));
       });
 
-      Promise.all([loadSettings(), loadBooks()])
+      Promise.all([loadSettings(), loadBooks(), loadGlobalGraphStatus()])
         .then(() => { renderBooks(); })
         .catch((error) => {
           setSidebarStatus(error.message);

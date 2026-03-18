@@ -2,7 +2,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from app.models.schemas import BookIndexResponse, BookSummary, BookUploadResponse, IndexJobStatus, RepairPlanResponse
+from app.models.schemas import BookIndexResponse, BookSummary, BookUploadResponse, GlobalGraphStatus, IndexJobStatus, RepairPlanResponse
 from app.services.book_catalog import BookCatalog
 from app.services.indexing_jobs import indexing_job_manager
 from app.services.lightrag_service import LightRAGService
@@ -30,6 +30,25 @@ async def upload_book(file: UploadFile = File(...)) -> BookUploadResponse:
         raise HTTPException(status_code=400, detail="Expected a .pdf file.")
 
     return await pdf_parser.save_and_parse(file)
+
+
+@router.get("/graph/status", response_model=GlobalGraphStatus)
+async def global_graph_status() -> GlobalGraphStatus:
+    return lightrag_service.get_global_graph_status()
+
+
+@router.post("/graph/rebuild", response_model=BookIndexResponse)
+async def rebuild_global_graph() -> BookIndexResponse:
+    if indexing_job_manager.is_running():
+        raise HTTPException(status_code=409, detail="A book indexing job is running right now. Wait until it finishes.")
+    return await lightrag_service.rebuild_global_graph()
+
+
+@router.delete("/graph", response_model=BookIndexResponse)
+async def delete_global_graph() -> BookIndexResponse:
+    if indexing_job_manager.is_running():
+        raise HTTPException(status_code=409, detail="A book indexing job is running right now. Wait until it finishes.")
+    return await lightrag_service.delete_global_graph()
 
 
 @router.post("/{book_id}/index", response_model=BookIndexResponse)

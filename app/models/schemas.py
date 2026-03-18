@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 
 Mode = Literal["naive", "local", "global", "hybrid", "mix", "auto"]
+Scope = Literal["book", "global"]
 
 
 class BookUploadResponse(BaseModel):
@@ -18,6 +19,17 @@ class BookIndexResponse(BaseModel):
     book_id: str
     status: str
     detail: str
+
+
+class GlobalGraphStatus(BaseModel):
+    status: str
+    detail: str
+    books_count: int = 0
+    indexed_pages: int = 0
+    chunk_count: int = 0
+    entity_count: int = 0
+    relation_count: int = 0
+    indexed_at: str | None = None
 
 
 class BookSummary(BaseModel):
@@ -97,6 +109,7 @@ class IndexJobStatus(BaseModel):
 
 class Citation(BaseModel):
     book_id: str
+    book_title: str | None = None
     page: int | None = None
     snippet: str = ""
 
@@ -104,6 +117,7 @@ class Citation(BaseModel):
 class AskRequest(BaseModel):
     question: str = Field(min_length=3)
     mode: Mode = "auto"
+    scope: Scope = "book"
     book_id: str | None = None
 
 
