@@ -28,7 +28,8 @@
       }
 
       .shell {
-        max-width: 1380px;
+        width: min(90vw, 1800px);
+        max-width: none;
         margin: 0 auto;
         padding: 24px;
       }
@@ -105,7 +106,7 @@
 
       .workspace {
         display: grid;
-        grid-template-columns: 360px 1fr;
+        grid-template-columns: minmax(420px, 1.05fr) minmax(760px, 1.75fr);
         gap: 18px;
       }
 
@@ -274,8 +275,102 @@
       }
 
       .answer-text {
-        white-space: pre-wrap;
         line-height: 1.62;
+      }
+
+      .answer-text > :first-child {
+        margin-top: 0;
+      }
+
+      .answer-text > :last-child {
+        margin-bottom: 0;
+      }
+
+      .answer-text p,
+      .answer-text ul,
+      .answer-text ol,
+      .answer-text h1,
+      .answer-text h2,
+      .answer-text h3,
+      .answer-text h4,
+      .answer-text h5,
+      .answer-text h6 {
+        margin: 0 0 14px;
+      }
+
+      .answer-text ul,
+      .answer-text ol {
+        padding-left: 24px;
+      }
+
+      .answer-text li + li {
+        margin-top: 8px;
+      }
+
+      .answer-text code {
+        padding: 2px 6px;
+        border-radius: 8px;
+        background: rgba(31, 42, 48, 0.08);
+        font-family: "Cascadia Code", "Consolas", monospace;
+        font-size: 0.94em;
+      }
+
+      .answer-text a {
+        color: var(--accent);
+      }
+
+      .answer-text .math-inline,
+      .answer-text .math-block {
+        font-family: "Cambria Math", "STIX Two Math", "Times New Roman", serif;
+        color: #22333b;
+        background: rgba(14, 124, 107, 0.06);
+        border: 1px solid rgba(14, 124, 107, 0.14);
+      }
+
+      .answer-text .math-inline {
+        display: inline-block;
+        padding: 1px 8px;
+        border-radius: 999px;
+        vertical-align: baseline;
+      }
+
+      .answer-text .math-block {
+        display: block;
+        margin: 14px 0;
+        padding: 12px 14px;
+        border-radius: 14px;
+        overflow-x: auto;
+      }
+
+      .answer-text .math-bold {
+        font-weight: 700;
+      }
+
+      .answer-text .math-roman {
+        font-style: normal;
+      }
+
+      .answer-text .math-frac {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        vertical-align: middle;
+        margin: 0 2px;
+      }
+
+      .answer-text .math-frac-top {
+        padding: 0 4px;
+        border-bottom: 1px solid currentColor;
+      }
+
+      .answer-text .math-frac-bottom {
+        padding: 0 4px;
+      }
+
+      .answer-text .math-sqrt {
+        display: inline-block;
+        padding-left: 3px;
+        border-top: 1px solid currentColor;
       }
 
       .citations {
@@ -430,6 +525,9 @@
           <div class="question-box">
             <div class="question-grid">
               <div>
+                <label for="askBookSelect">Книга для запроса</label>
+                <select id="askBookSelect"></select>
+
                 <label for="modeSelect">Режим</label>
                 <select id="modeSelect">
                   <option value="auto">auto</option>
@@ -479,9 +577,9 @@
                   Ключевые термины
                   <small>mode: local</small>
                 </button>
-                <button class="demo-btn" data-question="Как связаны между собой главные понятия, которые обсуждаются в книге?" data-mode="local">
+                <button class="demo-btn" data-question="Как связаны между собой главные понятия, которые обсуждаются в книге?" data-mode="mix">
                   Связи понятий
-                  <small>mode: local</small>
+                  <small>mode: mix</small>
                 </button>
                 <button class="demo-btn" data-question="Какие задачи или примеры встречаются в книге чаще всего?" data-mode="mix">
                   Типовые задачи
@@ -499,6 +597,7 @@
 
           <div class="answer-box">
             <div id="answerMode" class="pill">no answer yet</div>
+            <div id="answerBook" class="status-bar" style="margin-top: 12px;">Книга запроса пока не выбрана.</div>
             <div id="answerText" class="answer-text" style="margin-top: 16px;">
               Здесь появится ответ модели.
             </div>
@@ -524,10 +623,12 @@
         gpuStatus: document.getElementById("gpuStatus"),
         answerText: document.getElementById("answerText"),
         answerMode: document.getElementById("answerMode"),
+        answerBook: document.getElementById("answerBook"),
         citations: document.getElementById("citations"),
         llmStatus: document.getElementById("llmStatus"),
         embeddingStatus: document.getElementById("embeddingStatus"),
         selectedBookLabel: document.getElementById("selectedBookLabel"),
+        askBookSelect: document.getElementById("askBookSelect"),
         pdfFile: document.getElementById("pdfFile"),
         questionInput: document.getElementById("questionInput"),
         modeSelect: document.getElementById("modeSelect"),
@@ -558,13 +659,259 @@
       function setSidebarStatus(message) { ui.sidebarStatus.textContent = message; }
       function setChatStatus(message) { ui.chatStatus.textContent = message; }
 
+      const MATH_PLACEHOLDER_RE = /@@RAG_MATH_(\d+)@@/g;
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function stashMathSegments(source) {
+        const text = String(source ?? "").replace(/\r\n?/g, "\n");
+        const segments = [];
+        let index = 0;
+        let output = "";
+
+        function pushMath(tex, display) {
+          const placeholder = `@@RAG_MATH_${segments.length}@@`;
+          segments.push({ tex, display });
+          output += display ? `\n\n${placeholder}\n\n` : placeholder;
+        }
+
+        function findClosingDollar(start) {
+          for (let cursor = start; cursor < text.length; cursor += 1) {
+            if (text[cursor] === "\n") {
+              return -1;
+            }
+            if (text[cursor] === "$" && text[cursor - 1] !== "\\") {
+              return cursor;
+            }
+          }
+          return -1;
+        }
+
+        while (index < text.length) {
+          if (text.startsWith("$$", index)) {
+            const end = text.indexOf("$$", index + 2);
+            if (end !== -1) {
+              pushMath(text.slice(index + 2, end), true);
+              index = end + 2;
+              continue;
+            }
+          }
+
+          if (text.startsWith("\\[", index)) {
+            const end = text.indexOf("\\]", index + 2);
+            if (end !== -1) {
+              pushMath(text.slice(index + 2, end), true);
+              index = end + 2;
+              continue;
+            }
+          }
+
+          if (text.startsWith("\\(", index)) {
+            const end = text.indexOf("\\)", index + 2);
+            if (end !== -1) {
+              pushMath(text.slice(index + 2, end), false);
+              index = end + 2;
+              continue;
+            }
+          }
+
+          if (text[index] === "$" && text[index - 1] !== "\\") {
+            const end = findClosingDollar(index + 1);
+            if (end !== -1) {
+              pushMath(text.slice(index + 1, end), false);
+              index = end + 1;
+              continue;
+            }
+          }
+
+          output += text[index];
+          index += 1;
+        }
+
+        return { text: output, segments };
+      }
+
+      function formatLatexFallback(source) {
+        let html = escapeHtml(String(source ?? "").trim());
+
+        for (let step = 0; step < 4; step += 1) {
+          html = html
+            .replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '<span class="math-frac"><span class="math-frac-top">$1</span><span class="math-frac-bottom">$2</span></span>')
+            .replace(/\\sqrt\{([^{}]+)\}/g, '√<span class="math-sqrt">$1</span>')
+            .replace(/\\mathbf\{([^{}]+)\}/g, '<span class="math-bold">$1</span>')
+            .replace(/\\mathrm\{([^{}]+)\}/g, '<span class="math-roman">$1</span>');
+        }
+
+        const replacements = [
+          [/\\cdot/g, " · "],
+          [/\\times/g, " × "],
+          [/\\pm/g, " ± "],
+          [/\\neq/g, " ≠ "],
+          [/\\leq/g, " ≤ "],
+          [/\\le/g, " ≤ "],
+          [/\\geq/g, " ≥ "],
+          [/\\ge/g, " ≥ "],
+          [/\\rightarrow/g, " → "],
+          [/\\to/g, " → "],
+          [/\\left/g, ""],
+          [/\\right/g, ""],
+          [/\\lambda/g, "λ"],
+          [/\\alpha/g, "α"],
+          [/\\beta/g, "β"],
+          [/\\gamma/g, "γ"],
+          [/\\delta/g, "δ"],
+          [/\\theta/g, "θ"],
+          [/\\mu/g, "μ"],
+          [/\\pi/g, "π"],
+          [/\\sigma/g, "σ"],
+          [/\\omega/g, "ω"],
+          [/\\infty/g, "∞"],
+          [/\\sum/g, "∑"],
+          [/\\int/g, "∫"],
+          [/\\,/g, " "],
+          [/\\;/g, " "],
+          [/\\!/g, ""],
+        ];
+
+        for (const [pattern, value] of replacements) {
+          html = html.replace(pattern, value);
+        }
+
+        html = html
+          .replace(/\^\{([^{}]+)\}/g, "<sup>$1</sup>")
+          .replace(/_\{([^{}]+)\}/g, "<sub>$1</sub>")
+          .replace(/\^([A-Za-z0-9+\-])/g, "<sup>$1</sup>")
+          .replace(/_([A-Za-z0-9+\-])/g, "<sub>$1</sub>")
+          .replace(/[{}]/g, "")
+          .replace(/\\\\/g, "<br>")
+          .replace(/ {2,}/g, " ");
+
+        return html;
+      }
+
+      function renderMathSegment(segment) {
+        if (!segment) {
+          return "";
+        }
+
+        const tag = segment.display ? "div" : "span";
+        const className = segment.display ? "math-block" : "math-inline";
+        return `<${tag} class="${className}" data-latex="${escapeHtml(segment.tex)}">${formatLatexFallback(segment.tex)}</${tag}>`;
+      }
+
+      function renderInlineMarkdown(source, segments) {
+        let html = escapeHtml(source);
+
+        html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+        html = html.replace(/\*\*([^*][\s\S]*?)\*\*/g, "<strong>$1</strong>");
+        html = html.replace(/(^|[\s(])\*([^*\n][\s\S]*?[^*\n])\*(?=$|[\s).,;:!?])/g, "$1<em>$2</em>");
+        html = html.replace(/(^|[\s(])_([^_\n][\s\S]*?[^_\n])_(?=$|[\s).,;:!?])/g, "$1<em>$2</em>");
+        html = html.replace(
+          /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+          '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
+        );
+        html = html.replace(MATH_PLACEHOLDER_RE, (_, segmentIndex) => renderMathSegment(segments[Number(segmentIndex)]));
+
+        return html;
+      }
+
+      function renderRichText(source) {
+        const normalized = String(source ?? "").replace(/\r\n?/g, "\n").trim();
+        if (!normalized) {
+          return "<p>Ответ пуст.</p>";
+        }
+
+        const { text, segments } = stashMathSegments(normalized);
+        const lines = text.split("\n");
+        const blocks = [];
+        let paragraph = [];
+        let list = null;
+
+        function flushParagraph() {
+          if (!paragraph.length) {
+            return;
+          }
+          blocks.push(`<p>${renderInlineMarkdown(paragraph.join(" "), segments)}</p>`);
+          paragraph = [];
+        }
+
+        function flushList() {
+          if (!list || !list.items.length) {
+            list = null;
+            return;
+          }
+          const itemsHtml = list.items
+            .map((item) => `<li>${renderInlineMarkdown(item, segments)}</li>`)
+            .join("");
+          blocks.push(`<${list.type}>${itemsHtml}</${list.type}>`);
+          list = null;
+        }
+
+        for (const rawLine of lines) {
+          const line = rawLine.trim();
+
+          if (!line) {
+            flushParagraph();
+            flushList();
+            continue;
+          }
+
+          const mathOnly = line.match(/^@@RAG_MATH_(\d+)@@$/);
+          if (mathOnly) {
+            const segment = segments[Number(mathOnly[1])];
+            if (segment?.display) {
+              flushParagraph();
+              flushList();
+              blocks.push(renderMathSegment(segment));
+              continue;
+            }
+          }
+
+          const heading = line.match(/^(#{1,6})\s+(.*)$/);
+          if (heading) {
+            flushParagraph();
+            flushList();
+            const level = heading[1].length;
+            blocks.push(`<h${level}>${renderInlineMarkdown(heading[2], segments)}</h${level}>`);
+            continue;
+          }
+
+          const unordered = rawLine.match(/^\s*[-*+]\s+(.*)$/);
+          const ordered = rawLine.match(/^\s*\d+\.\s+(.*)$/);
+          if (unordered || ordered) {
+            flushParagraph();
+            const type = ordered ? "ol" : "ul";
+            if (!list || list.type !== type) {
+              flushList();
+              list = { type, items: [] };
+            }
+            list.items.push((unordered || ordered)[1].trim());
+            continue;
+          }
+
+          flushList();
+          paragraph.push(line);
+        }
+
+        flushParagraph();
+        flushList();
+        return blocks.join("");
+      }
+
       function isRunningStatus(status) {
         return status === "queued" || status === "running";
       }
 
       function formatDuration(totalSeconds) {
         if (totalSeconds == null || Number.isNaN(totalSeconds)) {
-          return "n/a";
+          return "уточняется";
         }
         const seconds = Math.max(0, Math.round(totalSeconds));
         const hours = Math.floor(seconds / 3600);
@@ -608,7 +955,7 @@
         ui.indexWarningsMeta.textContent =
           `Format errors: ${data.format_error_count || 0} • Relation: ${data.relation_format_error_count || 0} • Entity: ${data.entity_format_error_count || 0} • Warning chunks: ${data.warning_chunk_count || 0}${data.last_warning ? ` • Last: ${String(data.last_warning).slice(0, 180)}` : ""}`;
         ui.indexTimeMeta.textContent =
-          `Elapsed: ${formatDuration(data.elapsed_seconds)} • Speed: ${data.pages_per_minute ?? "n/a"} pages/min • ETA: ${formatDuration(data.eta_seconds)}`;
+          `Elapsed: ${formatDuration(data.elapsed_seconds)} • Speed: ${data.pages_per_minute ?? "уточняется"} pages/min • ETA: ${formatDuration(data.eta_seconds)}`;
 
         if (data.gpu && data.gpu.name) {
           ui.gpuStatus.textContent =
@@ -668,8 +1015,31 @@
         state.selectedBookId = bookId;
         const book = state.books.find((item) => item.book_id === bookId);
         ui.selectedBookLabel.textContent = book ? book.title : "none";
+        ui.askBookSelect.value = bookId || "";
         renderBooks();
         refreshIndexStatus(bookId).catch((error) => setSidebarStatus(error.message));
+      }
+
+      function renderAskBookOptions() {
+        ui.askBookSelect.innerHTML = "";
+        if (!state.books.length) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "Нет загруженных книг";
+          ui.askBookSelect.appendChild(option);
+          ui.askBookSelect.disabled = true;
+          return;
+        }
+
+        ui.askBookSelect.disabled = false;
+        for (const book of state.books) {
+          const option = document.createElement("option");
+          option.value = book.book_id;
+          option.textContent = `${book.title} [${book.book_id}]`;
+          ui.askBookSelect.appendChild(option);
+        }
+
+        ui.askBookSelect.value = state.selectedBookId || state.books[0].book_id;
       }
 
       function renderBooks() {
@@ -680,11 +1050,19 @@
         }
 
         for (const book of state.books) {
+          const totalDocs = book.indexable_pages || book.pages || 0;
+          const latestPage = book.latest_processed_page ? ` • последняя стр.: ${book.latest_processed_page}` : "";
+          const progressMeta =
+            totalDocs > 0
+              ? `обработано: ${book.processed_docs || 0}/${totalDocs} • ошибок: ${book.failed_docs || 0} • осталось: ${book.remaining_docs || 0} • ${book.progress_percent ?? 0}%${latestPage}`
+              : "обработано: 0";
           const item = document.createElement("div");
           item.className = `book ${book.book_id === state.selectedBookId ? "active" : ""}`;
           item.innerHTML = `
             <div class="book-title">${book.title}</div>
             <div class="book-meta">${book.pages} pages • status: ${book.status}</div>
+            <div class="book-meta">${progressMeta}</div>
+            <div class="book-meta">чанков: ${book.chunk_count || 0}</div>
             <div class="book-meta">${book.indexed_at ? `indexed: ${new Date(book.indexed_at).toLocaleString()}` : "not indexed yet"}</div>
             <div class="book-actions">
               <button class="secondary" data-action="select" data-book="${book.book_id}">Select</button>
@@ -698,17 +1076,26 @@
       }
 
       function renderAnswer(data) {
+        const selectedBook = state.books.find((item) => item.book_id === state.selectedBookId);
         ui.answerMode.textContent = `requested ${data.mode_requested} • used ${data.mode_used}`;
-        ui.answerText.textContent = data.answer;
+        ui.answerBook.textContent = selectedBook
+          ? `Ответ построен по книге: ${selectedBook.title} [${selectedBook.book_id}]`
+          : "Книга для ответа не определена.";
+        ui.answerText.innerHTML = renderRichText(data.answer);
         ui.citations.innerHTML = "";
 
         for (const citation of data.citations || []) {
           const node = document.createElement("div");
           node.className = "citation";
-          node.innerHTML = `
-            <strong>page ${citation.page ?? "?"}</strong>
-            <div style="margin-top: 8px; color: var(--muted); line-height: 1.5;">${citation.snippet || "No snippet available."}</div>
-          `;
+          const title = document.createElement("strong");
+          title.textContent = `page ${citation.page ?? "?"}`;
+          const snippet = document.createElement("div");
+          snippet.style.marginTop = "8px";
+          snippet.style.color = "var(--muted)";
+          snippet.style.lineHeight = "1.5";
+          snippet.textContent = citation.snippet || "No snippet available.";
+          node.appendChild(title);
+          node.appendChild(snippet);
           ui.citations.appendChild(node);
         }
       }
@@ -732,6 +1119,7 @@
         }
         ui.selectedBookLabel.textContent =
           state.books.find((item) => item.book_id === state.selectedBookId)?.title || "none";
+        renderAskBookOptions();
         renderBooks();
         if (refreshStatus) {
           await refreshIndexStatus(state.selectedBookId, { autoPoll: true });
@@ -828,7 +1216,8 @@
       }
 
       async function askQuestion() {
-        if (!state.selectedBookId) {
+        const targetBookId = ui.askBookSelect.value || state.selectedBookId;
+        if (!targetBookId) {
           setChatStatus("Сначала выбери книгу.");
           return;
         }
@@ -839,14 +1228,16 @@
           return;
         }
 
-        setChatStatus("Выполняю запрос...");
+        const selectedBook = state.books.find((item) => item.book_id === targetBookId);
+        setSelectedBook(targetBookId);
+        setChatStatus(selectedBook ? `Выполняю запрос по книге: ${selectedBook.title}` : "Выполняю запрос...");
         const data = await fetchJson("/ask", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             question,
             mode: ui.modeSelect.value,
-            book_id: state.selectedBookId,
+            book_id: targetBookId,
           }),
         });
         renderAnswer(data);
@@ -869,6 +1260,12 @@
       ui.reindexBtn.addEventListener("click", () => reindexBook().catch((error) => setSidebarStatus(error.message)));
       ui.repairBtn.addEventListener("click", () => repairBook().catch((error) => setSidebarStatus(error.message)));
       ui.repairAskBtn.addEventListener("click", () => repairBook().catch((error) => setSidebarStatus(error.message)));
+      ui.askBookSelect.addEventListener("change", (event) => {
+        const bookId = event.target.value;
+        if (bookId) {
+          setSelectedBook(bookId);
+        }
+      });
 
       ui.bookList.addEventListener("click", (event) => {
         const target = event.target.closest("button");

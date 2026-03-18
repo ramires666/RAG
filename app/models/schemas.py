@@ -24,12 +24,19 @@ class BookSummary(BaseModel):
     book_id: str
     title: str
     pages: int
+    indexable_pages: int = 0
     status: str
     uploaded_at: str | None = None
     indexed_at: str | None = None
     raw_path: str
     parsed_path: str
     index_path: str | None = None
+    processed_docs: int = 0
+    failed_docs: int = 0
+    remaining_docs: int = 0
+    progress_percent: float = 0
+    chunk_count: int = 0
+    latest_processed_page: int | None = None
 
 
 class RepairPlanResponse(BaseModel):

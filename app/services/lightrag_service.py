@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import re
+import shlex
 import shutil
 import subprocess
 from contextlib import asynccontextmanager
@@ -19,10 +20,23 @@ from app.config import get_settings
 from app.models.schemas import AskResponse, BookIndexResponse, Citation, RepairPlanResponse, SettingsStatus
 from app.services.book_catalog import BookCatalog
 from app.services.local_embeddings import make_hash_embedding_func
+from app.services.page_filter import is_indexable_page
 
 
 PAGE_RE = re.compile(r"#page=(\d+)")
 TOKEN_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё_]{3,}")
+DRAFT_GLOBAL_HINTS = (
+    "summary",
+    "краткое",
+    "обзор",
+    "в целом",
+    "главные",
+    "основные",
+    "темы",
+    "структура",
+    "разделы",
+    "что изучается",
+)
 LOGGER = logging.getLogger(__name__)
 LLM_RESTART_LOCK = asyncio.Lock()
 
@@ -405,7 +419,14 @@ class LightRAGService:
         book_id: str,
         health: dict[str, int],
     ) -> AskResponse:
-        draft_pages = self._select_draft_pages(book_id, question, limit=6)
+        prefer_spread = self._is_global_style_question(question, mode)
+        limit = 12 if prefer_spread else 6
+        draft_pages = self._select_draft_pages(
+            book_id,
+            question,
+            limit=limit,
+            prefer_spread=prefer_spread,
+        )
         if not draft_pages:
             return AskResponse(
                 mode_requested=requested_mode,  # type: ignore[arg-type]
@@ -525,8 +546,8 @@ class LightRAGService:
                 )
             except Exception as exc:
                 last_exc = exc
-                is_alive = await self._check_llm_health()
-                if is_alive:
+                ready_now = await self._check_llm_ready(model)
+                if ready_now:
                     raise
 
                 grace_recovered = await self._wait_for_existing_llm_ready(
@@ -534,10 +555,15 @@ class LightRAGService:
                     timeout_seconds=max(int(self.settings.llm_restart_grace_seconds), 1),
                 )
                 if grace_recovered:
+                    LOGGER.warning(
+                        "LLM request failed, but the existing server recovered during grace wait. Retrying attempt %s/%s.",
+                        attempt,
+                        attempts,
+                    )
                     continue
 
                 LOGGER.warning(
-                    "LLM call failed and healthcheck is down. Restart attempt %s/%s. Error: %s",
+                    "LLM call failed and readiness probe did not recover. Restart attempt %s/%s. Error: %s",
                     attempt,
                     attempts,
                     exc,
@@ -617,18 +643,8 @@ class LightRAGService:
             ):
                 return True
 
-            try:
-                await asyncio.to_thread(
-                    subprocess.Popen,
-                    ["cmd.exe", "/c", f'start "" {command}'],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    stdin=subprocess.DEVNULL,
-                    close_fds=True,
-                    start_new_session=True,
-                )
-            except (FileNotFoundError, OSError, subprocess.SubprocessError) as exc:
-                LOGGER.warning("Failed to execute llama-server restart command: %s", exc)
+            launched = await self._launch_restart_command(command)
+            if not launched:
                 return False
 
             timeout_seconds = max(int(self.settings.llm_restart_timeout_seconds), 10)
@@ -641,6 +657,82 @@ class LightRAGService:
                 await asyncio.sleep(poll_interval)
 
             return False
+
+    async def _launch_restart_command(self, command: str) -> bool:
+        launchers = [
+            self._build_powershell_start_command(command),
+            ["cmd.exe", "/c", f'start "" {command}'],
+        ]
+
+        for launcher in launchers:
+            if not launcher:
+                continue
+            try:
+                wrapped_launcher = self._wrap_windows_launcher(launcher)
+                result = await asyncio.to_thread(
+                    subprocess.run,
+                    wrapped_launcher,
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                    check=False,
+                )
+            except (FileNotFoundError, OSError, subprocess.SubprocessError) as exc:
+                LOGGER.warning("Failed to execute restart launcher %s: %s", launcher[0], exc)
+                continue
+
+            if result.returncode == 0:
+                LOGGER.warning("Issued llama-server restart via %s", launcher[0])
+                return True
+
+            stdout = (result.stdout or "").strip()
+            stderr = (result.stderr or "").strip()
+            LOGGER.warning(
+                "Restart launcher %s failed with code %s. stdout=%s stderr=%s",
+                launcher[0],
+                result.returncode,
+                stdout[:500],
+                stderr[:500],
+            )
+
+        return False
+
+    def _wrap_windows_launcher(self, launcher: list[str]) -> list[str]:
+        command_line = " ".join(shlex.quote(part) for part in launcher)
+        return ["/bin/bash", "-lc", command_line]
+
+    def _build_powershell_start_command(self, command: str) -> list[str] | None:
+        try:
+            parts = shlex.split(command)
+        except ValueError as exc:
+            LOGGER.warning("Failed to parse restart command for PowerShell launcher: %s", exc)
+            return None
+
+        if not parts:
+            return None
+
+        executable = parts[0]
+        args = parts[1:]
+
+        def _ps_quote(value: str) -> str:
+            return "'" + value.replace("'", "''") + "'"
+
+        argument_list = ", ".join(_ps_quote(arg) for arg in args)
+        script = (
+            "$ErrorActionPreference='Stop'; "
+            f"Start-Process -FilePath {_ps_quote(executable)} "
+            f"-ArgumentList @({argument_list}) -WindowStyle Hidden"
+        )
+
+        return [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ]
 
     async def _wait_for_existing_llm_ready(self, model: str, timeout_seconds: int) -> bool:
         if timeout_seconds <= 0:
@@ -724,6 +816,8 @@ class LightRAGService:
             text = str(page.get("text", "")).strip()
             if not text:
                 continue
+            if not is_indexable_page(text):
+                continue
 
             documents.append(f"Book: {title}\nPage: {page_number}\n\n{text}")
             ids.append(f"{book_id}-page-{page_number:04d}")
@@ -731,7 +825,13 @@ class LightRAGService:
 
         return documents, ids, file_paths
 
-    def _select_draft_pages(self, book_id: str, question: str, limit: int = 6) -> list[dict[str, Any]]:
+    def _select_draft_pages(
+        self,
+        book_id: str,
+        question: str,
+        limit: int = 6,
+        prefer_spread: bool = False,
+    ) -> list[dict[str, Any]]:
         payload = self._load_parsed_book(book_id)
         if payload is None:
             return []
@@ -794,6 +894,10 @@ class LightRAGService:
                         "score": 0,
                     }
                 )
+
+        if prefer_spread:
+            candidates.sort(key=lambda item: int(item["page"]))
+            return self._spread_sample(candidates, limit)
 
         candidates.sort(key=lambda item: (-int(item["score"]), int(item["page"])))
         return candidates[:limit]
@@ -862,6 +966,32 @@ class LightRAGService:
             return json.loads(path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             return {}
+
+    def _is_global_style_question(self, question: str, mode: str) -> bool:
+        lowered = question.lower()
+        if mode == "global":
+            return True
+        return any(hint in lowered for hint in DRAFT_GLOBAL_HINTS)
+
+    def _spread_sample(self, candidates: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+        if len(candidates) <= limit:
+            return candidates
+
+        if limit <= 1:
+            return [candidates[0]]
+
+        last_index = len(candidates) - 1
+        selected: list[dict[str, Any]] = []
+        used_indexes: set[int] = set()
+
+        for i in range(limit):
+            index = round((last_index * i) / (limit - 1))
+            if index in used_indexes:
+                continue
+            used_indexes.add(index)
+            selected.append(candidates[index])
+
+        return selected[:limit]
 
     def _load_full_doc_ids(self, book_id: str) -> set[str]:
         path = self._book_workdir(book_id) / "kv_store_full_docs.json"

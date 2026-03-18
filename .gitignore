@@ -51,3 +51,6 @@ data/lightrag/*
 !data/parsed/.gitkeep
 !data/indexes/.gitkeep
 !data/lightrag/.gitkeep
+
+
+tools/*

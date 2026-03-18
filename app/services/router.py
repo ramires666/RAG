@@ -18,6 +18,10 @@ Classify the user question into exactly one retrieval mode:
 - global: whole-book themes, high-level summaries, central ideas, broad conclusions
 - mix: ambiguous, broad, multi-hop, or when both graph-style and vector-style retrieval may help
 
+Important:
+- If the question asks about relations between specific named entities or a clearly bounded concept set, prefer local.
+- If the question asks about the main concepts of the whole book and how they connect overall, prefer mix or global, not local.
+
 Return only JSON that matches the provided schema.
 """.strip()
 
@@ -52,6 +56,14 @@ class QueryRouter:
             "термин",
             "концепт",
             "зависимость",
+        )
+        self.broad_relation_keywords = (
+            "главные понятия",
+            "основные понятия",
+            "в книге",
+            "между собой",
+            "главные темы",
+            "основные темы",
         )
         self.global_keywords = (
             "тема",
@@ -139,6 +151,10 @@ class QueryRouter:
             return "naive"
         if any(keyword in text for keyword in self.global_keywords):
             return "global"
+        if any(keyword in text for keyword in self.graph_keywords) and any(
+            keyword in text for keyword in self.broad_relation_keywords
+        ):
+            return "mix"
         if any(keyword in text for keyword in self.graph_keywords):
             return "local"
         return "mix"

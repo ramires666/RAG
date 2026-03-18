@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -39,6 +40,7 @@ class _JobState:
     updated_at: str | None = None
     finished_at: str | None = None
     task: asyncio.Task | None = None
+    progress_samples: list[tuple[float, int]] = field(default_factory=list)
 
 
 class _LightRAGWarningHandler(logging.Handler):
@@ -98,6 +100,7 @@ class IndexingJobManager:
                 started_at=now,
                 updated_at=now,
             )
+            state.progress_samples.append((time.monotonic(), 0))
             state.task = asyncio.create_task(self._run_reindex(state))
             self._jobs[book_id] = state
 
@@ -130,6 +133,7 @@ class IndexingJobManager:
                 started_at=now,
                 updated_at=now,
             )
+            state.progress_samples.append((time.monotonic(), 0))
             state.task = asyncio.create_task(self._run_repair(state))
             self._jobs[book_id] = state
 
@@ -282,11 +286,12 @@ class IndexingJobManager:
         state.processed_docs = stats["processed_docs"]
         state.failed_docs = stats["failed_docs"]
         state.chunk_count = stats["chunk_count"]
+        completed = state.processed_docs + state.failed_docs
+        self._record_progress_sample(state, completed)
         if state.total_docs <= 0:
             state.total_docs = self._service.source_document_count(state.book_id)
         state.updated_at = _utc_now()
         if state.status == "running":
-            completed = state.processed_docs + state.failed_docs
             prefix = "Repairing" if state.operation == "repair" else "Running"
             state.detail = f"{prefix}: {completed}/{state.total_docs} pages, failed={state.failed_docs}, chunks={state.chunk_count}"
 
@@ -297,6 +302,7 @@ class IndexingJobManager:
             processed_docs=stats["processed_docs"],
             failed_docs=stats["failed_docs"],
             started_at=state.started_at,
+            progress_samples=state.progress_samples,
         )
         return IndexJobStatus(
             book_id=state.book_id,
@@ -330,6 +336,7 @@ class IndexingJobManager:
         processed_docs: int,
         failed_docs: int,
         started_at: str | None,
+        progress_samples: list[tuple[float, int]] | None = None,
     ) -> dict[str, int | float | None]:
         completed = processed_docs + failed_docs
         remaining = max(total_docs - completed, 0)
@@ -345,10 +352,11 @@ class IndexingJobManager:
             except ValueError:
                 elapsed_seconds = None
 
-        if elapsed_seconds and elapsed_seconds > 0 and completed > 0:
-            pages_per_minute = round(completed / (elapsed_seconds / 60), 2)
-            if pages_per_minute > 0 and remaining > 0:
-                eta_seconds = max(int((remaining / pages_per_minute) * 60), 0)
+        if progress_samples:
+            pages_per_minute, eta_seconds = self._estimate_speed_and_eta(
+                progress_samples=progress_samples,
+                remaining=remaining,
+            )
 
         return {
             "remaining_docs": remaining,
@@ -357,6 +365,67 @@ class IndexingJobManager:
             "pages_per_minute": pages_per_minute,
             "eta_seconds": eta_seconds,
         }
+
+    def _record_progress_sample(self, state: _JobState, completed: int) -> None:
+        now = time.monotonic()
+        if not state.progress_samples:
+            state.progress_samples.append((now, completed))
+            return
+
+        last_time, last_completed = state.progress_samples[-1]
+        if completed != last_completed or (now - last_time) >= 5:
+            state.progress_samples.append((now, completed))
+
+        window_seconds = 180
+        cutoff = now - window_seconds
+        state.progress_samples = [
+            sample for sample in state.progress_samples if sample[0] >= cutoff
+        ]
+
+    def _estimate_speed_and_eta(
+        self,
+        progress_samples: list[tuple[float, int]],
+        remaining: int,
+    ) -> tuple[float | None, int | None]:
+        if len(progress_samples) < 3:
+            return None, None
+
+        end_time, end_completed = progress_samples[-1]
+        stable_samples = [
+            sample for sample in progress_samples if (end_time - sample[0]) <= 90
+        ]
+        if len(stable_samples) < 3:
+            return None, None
+
+        start_time, start_completed = stable_samples[0]
+        delta_time = end_time - start_time
+        delta_completed = end_completed - start_completed
+        if delta_time < 45 or delta_completed < 5:
+            return None, None
+
+        short_rate = delta_completed / (delta_time / 60)
+
+        long_start_time, long_start_completed = progress_samples[0]
+        long_delta_time = end_time - long_start_time
+        long_delta_completed = end_completed - long_start_completed
+        if long_delta_time < 60 or long_delta_completed < 5:
+            return None, None
+
+        long_rate = long_delta_completed / (long_delta_time / 60)
+        if long_rate <= 0 or short_rate <= 0:
+            return None, None
+
+        stability_ratio = max(short_rate, long_rate) / min(short_rate, long_rate)
+        if stability_ratio > 1.8:
+            return None, None
+
+        blended_rate = (short_rate * 0.65) + (long_rate * 0.35)
+        pages_per_minute = round(blended_rate, 1)
+        if pages_per_minute <= 0 or remaining <= 0:
+            return pages_per_minute if pages_per_minute > 0 else None, None
+
+        eta_seconds = max(int((remaining / pages_per_minute) * 60), 0)
+        return pages_per_minute, eta_seconds
 
     def _read_gpu_status(self) -> GpuStatus | None:
         try:

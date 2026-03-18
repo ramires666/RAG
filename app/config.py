@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     llm_restart_timeout_seconds: int = Field(default=180, alias="LLM_RESTART_TIMEOUT_SECONDS")
     llm_restart_poll_interval_seconds: float = Field(default=3.0, alias="LLM_RESTART_POLL_INTERVAL_SECONDS")
     llm_restart_grace_seconds: int = Field(default=8, alias="LLM_RESTART_GRACE_SECONDS")
+    llm_stall_restart_seconds: int = Field(default=45, alias="LLM_STALL_RESTART_SECONDS")
+    llm_request_timeout_seconds: int = Field(default=18, alias="LLM_REQUEST_TIMEOUT_SECONDS")
     llm_call_retry_attempts: int = Field(default=2, alias="LLM_CALL_RETRY_ATTEMPTS")
     embedding_base_url: str | None = Field(default=None, alias="EMBEDDING_BASE_URL")
     embedding_api_key: str | None = Field(default=None, alias="EMBEDDING_API_KEY")
